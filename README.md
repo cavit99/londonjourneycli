@@ -157,6 +157,8 @@ Live TfL tests are opt-in:
 
 No TfL API key is committed. Set TFL_APP_KEY if you have one.
 
+For a concise public summary and demo commands, see [docs/share.md](docs/share.md).
+
 ## Repository Layout
 
 - cmd/londonjourneycli: binary entry point
