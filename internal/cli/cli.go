@@ -581,7 +581,7 @@ func runArgvWithIO(ctx context.Context, argv []string, opts runOptions, stdout, 
 
 func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|nearby-stops|stop-search|stop-info|arrivals|next-arrival|journey|watch-arrival>")
+		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|line-routes|nearby-stops|stop-search|stop-info|arrivals|next-arrival|journey|watch-arrival>")
 		return exitcode.Usage
 	}
 	client := tfl.NewClient(os.Getenv("TFL_APP_KEY"))
@@ -593,6 +593,8 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 		return tflStatus(ctx, g, client, args[1:], stdout, stderr)
 	case "disruptions":
 		return tflDisruptions(ctx, g, client, args[1:], stdout, stderr)
+	case "line-routes":
+		return tflLineRoutes(ctx, g, client, args[1:], stdout, stderr)
 	case "nearby-stops":
 		return tflNearbyStops(ctx, g, client, args[1:], stdout, stderr)
 	case "stop-search":
@@ -702,6 +704,52 @@ func tflDisruptions(ctx context.Context, g globals, client *tfl.Client, args []s
 			label = d.Category
 		}
 		fmt.Fprintf(stdout, "%s: %s\n", label, disruptionText(d))
+	}
+	return exitcode.OK
+}
+
+func tflLineRoutes(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("line-routes", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	line := fs.String("line", "", "comma-separated TfL line IDs")
+	if err := fs.Parse(args); err != nil {
+		return exitcode.Usage
+	}
+	lines := csvArgs(*line)
+	if len(lines) == 0 {
+		fmt.Fprintln(stderr, "--line is required")
+		return exitcode.Usage
+	}
+	routes, err := client.LineRoutes(ctx, lines)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitcode.Network
+	}
+	if routes == nil {
+		routes = []tfl.LineRoute{}
+	}
+	if g.format == output.JSON {
+		return writeJSON(g, stdout, stderr, routes)
+	}
+	if g.format == output.Plain {
+		var rows [][]string
+		for _, routeLine := range routes {
+			for _, section := range routeLine.RouteSections {
+				rows = append(rows, []string{routeLine.ID, routeLine.Name, routeLine.ModeName, section.Direction, section.OriginationName, section.DestinationName, section.Originator, section.Destination, section.ServiceType})
+			}
+		}
+		_ = output.WritePlainRows(stdout, rows)
+		return exitcode.OK
+	}
+	if len(routes) == 0 {
+		fmt.Fprintln(stdout, "No line routes found.")
+		return exitcode.OK
+	}
+	for _, routeLine := range routes {
+		fmt.Fprintf(stdout, "%s (%s)\n", routeLine.Name, routeLine.ModeName)
+		for _, section := range routeLine.RouteSections {
+			fmt.Fprintf(stdout, "  %s: %s -> %s\n", section.Direction, section.OriginationName, section.DestinationName)
+		}
 	}
 	return exitcode.OK
 }
@@ -1600,6 +1648,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  test <skill>                 Run manifest tests")
 	fmt.Fprintln(w, "  tfl status [--line ID]       Show live TfL line status")
 	fmt.Fprintln(w, "  tfl disruptions [--line ID]  Show active TfL disruptions")
+	fmt.Fprintln(w, "  tfl line-routes --line ID    Show line route sections")
 	fmt.Fprintln(w, "  tfl nearby-stops --lat --lon Find stops near coordinates")
 	fmt.Fprintln(w, "  tfl stop-search <query>      Search TfL stops and stations")
 	fmt.Fprintln(w, "  tfl stop-info --stop ID      Show a stop point and child stops")

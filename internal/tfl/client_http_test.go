@@ -19,6 +19,10 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte("[{\"id\":\"victoria\",\"name\":\"Victoria\",\"modeName\":\"tube\",\"lineStatuses\":[{\"statusSeverity\":6,\"statusSeverityDescription\":\"Severe Delays\",\"disruption\":{\"category\":\"RealTime\",\"type\":\"lineInfo\",\"description\":\"Minor platform crowding\",\"closureText\":\"minorDelays\"}}]}]"))
 	})
+	mux.HandleFunc("/Line/victoria/Route", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[{\"id\":\"victoria\",\"name\":\"Victoria\",\"modeName\":\"tube\",\"routeSections\":[{\"direction\":\"inbound\",\"originationName\":\"Walthamstow Central\",\"destinationName\":\"Brixton\",\"originator\":\"940GZZLUWWL\",\"destination\":\"940GZZLUBXN\",\"serviceType\":\"Regular\"}]}]"))
+	})
 	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("query"); got != "London Bridge" {
 			t.Fatalf("query=%q", got)
@@ -131,6 +135,13 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	}
 	if len(disruptions) != 1 || disruptions[0].LineName != "Victoria" || disruptions[0].Description != "Minor platform crowding" {
 		t.Fatalf("unexpected disruptions: %+v", disruptions)
+	}
+	routes, err := c.LineRoutes(context.Background(), []string{"victoria"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || len(routes[0].RouteSections) != 1 || routes[0].RouteSections[0].DestinationName != "Brixton" {
+		t.Fatalf("unexpected routes: %+v", routes)
 	}
 
 	search, err := c.StopSearch(context.Background(), "London Bridge")

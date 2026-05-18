@@ -1,6 +1,7 @@
 package tfl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -91,6 +92,29 @@ type Disruption struct {
 	Summary     string `json:"summary,omitempty"`
 	LineID      string `json:"lineId,omitempty"`
 	LineName    string `json:"lineName,omitempty"`
+}
+
+type LineRoute struct {
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	ModeName      string            `json:"modeName,omitempty"`
+	RouteSections []RouteSection    `json:"routeSections,omitempty"`
+	ServiceTypes  []LineServiceType `json:"serviceTypes,omitempty"`
+}
+
+type RouteSection struct {
+	Name            string `json:"name,omitempty"`
+	Direction       string `json:"direction,omitempty"`
+	OriginationName string `json:"originationName,omitempty"`
+	DestinationName string `json:"destinationName,omitempty"`
+	Originator      string `json:"originator,omitempty"`
+	Destination     string `json:"destination,omitempty"`
+	ServiceType     string `json:"serviceType,omitempty"`
+}
+
+type LineServiceType struct {
+	Name string `json:"name,omitempty"`
+	URI  string `json:"uri,omitempty"`
 }
 
 type rawArrival struct {
@@ -367,6 +391,37 @@ func (c *Client) LineDisruptions(ctx context.Context, lines, modes []string) ([]
 		return []Disruption{}, nil
 	}
 	return out, nil
+}
+
+func (c *Client) LineRoutes(ctx context.Context, lines []string) ([]LineRoute, error) {
+	lineIDs := strings.Join(cleanCSV(lines), ",")
+	if lineIDs == "" {
+		return nil, errors.New("at least one line is required")
+	}
+	u, err := c.endpoint("/Line/"+url.PathEscape(lineIDs)+"/Route", nil)
+	if err != nil {
+		return nil, err
+	}
+	var raw json.RawMessage
+	if err := c.getJSON(ctx, u, &raw); err != nil {
+		return nil, err
+	}
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return []LineRoute{}, nil
+	}
+	if raw[0] == '[' {
+		var out []LineRoute
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+	var single LineRoute
+	if err := json.Unmarshal(raw, &single); err != nil {
+		return nil, err
+	}
+	return []LineRoute{single}, nil
 }
 
 func firstNonEmpty(values ...string) string {

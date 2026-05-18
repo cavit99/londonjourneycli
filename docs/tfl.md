@@ -7,8 +7,11 @@ LondonJourneyCLI includes a small TfL client for London journey planning and liv
     londonjourneycli tfl status
     londonjourneycli tfl status --line victoria
     londonjourneycli --json tfl disruptions --mode tube,dlr,elizabeth-line,overground,tram
+    londonjourneycli --json tfl line-routes --line victoria
 
 The default mode set is tube, DLR, Elizabeth line, Overground, and tram. Use --line for specific line IDs or --mode for a comma-separated mode set.
+
+Use line-routes when an agent needs line endpoints/directions to explain a service or choose the correct direction filter.
 
 ## Journey Planning
 

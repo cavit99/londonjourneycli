@@ -20,6 +20,9 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 	mux.HandleFunc("/Line/victoria/Status", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("[{\"id\":\"victoria\",\"name\":\"Victoria\",\"modeName\":\"tube\",\"lineStatuses\":[{\"statusSeverity\":6,\"statusSeverityDescription\":\"Severe Delays\",\"disruption\":{\"category\":\"RealTime\",\"type\":\"lineInfo\",\"description\":\"Minor platform crowding\",\"closureText\":\"minorDelays\"}}]}]"))
 	})
+	mux.HandleFunc("/Line/victoria/Route", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[{\"id\":\"victoria\",\"name\":\"Victoria\",\"modeName\":\"tube\",\"routeSections\":[{\"direction\":\"inbound\",\"originationName\":\"Walthamstow Central\",\"destinationName\":\"Brixton\",\"originator\":\"940GZZLUWWL\",\"destination\":\"940GZZLUBXN\",\"serviceType\":\"Regular\"}]}]"))
+	})
 	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("{\"Query\":\"London Bridge\",\"Total\":1,\"Matches\":[{\"ID\":\"490000139R\",\"Name\":\"London Bridge Station\",\"Lat\":51.5,\"Lon\":-0.08,\"Modes\":[\"bus\"]}]}"))
 	})
@@ -72,6 +75,7 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		{name: "disruptions", args: []string{"--plain", "tfl", "disruptions", "--line", "victoria"}, want: "victoria\tVictoria\tRealTime\tlineInfo\tMinor platform crowding", code: exitcode.OK},
 		{name: "disruptions empty json", args: []string{"--json", "tfl", "disruptions"}, want: "[]", code: exitcode.OK},
 		{name: "disruptions empty human", args: []string{"tfl", "disruptions"}, want: "No active disruptions found.", code: exitcode.OK},
+		{name: "line routes", args: []string{"--json", "tfl", "line-routes", "--line", "victoria"}, want: "Walthamstow Central", code: exitcode.OK},
 		{name: "nearby stops", args: []string{"--json", "tfl", "nearby-stops", "--lat", "51.505", "--lon", "-0.087", "--limit", "1"}, want: "London Bridge Bus Station", code: exitcode.OK},
 		{name: "nearby naptan fallback", args: []string{"--json", "tfl", "nearby-stops", "--lat", "51.505", "--lon", "-0.087", "--limit", "2"}, want: "490FAR", code: exitcode.OK},
 		{name: "nearby meridian", args: []string{"--json", "tfl", "nearby-stops", "--lat", "51.48", "--lon", "0", "--limit", "1"}, want: "London Bridge Bus Station", code: exitcode.OK},

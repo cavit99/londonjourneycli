@@ -22,6 +22,7 @@ Agents should resolve "home", "office", venue names, and vague areas before call
 JSON mode structures TfL API errors that return HTTP responses, including status "ambiguous" and status "api_error". Lower-level request failures such as DNS or local timeouts can still be stderr-only diagnostics with a non-zero exit code.
 
 Use tfl status and tfl disruptions before giving time-sensitive route advice when delays would change the recommendation.
+Use tfl line-routes when choosing or explaining line direction, termini, or service sections.
 
 Use tfl nearby-stops when the user gives a current GPS/location coordinate or when a resolved address yields coordinates and the agent needs concrete stop IDs nearby.
 

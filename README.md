@@ -63,6 +63,7 @@ TfL examples:
     londonjourneycli --json tfl nearby-stops --lat 51.505 --lon -0.087 --mode bus --limit 5
     londonjourneycli tfl status --line victoria
     londonjourneycli --json tfl disruptions --mode tube,dlr,elizabeth-line,overground,tram
+    londonjourneycli --json tfl line-routes --line victoria
     londonjourneycli --json --output 0.lineStatuses.0.statusSeverityDescription tfl status --line victoria
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
     londonjourneycli tfl journey --from "Westminster" --to "Waterloo" --preference LeastWalking --max-walking-minutes 15

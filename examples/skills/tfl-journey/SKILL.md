@@ -15,6 +15,7 @@ Examples:
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington" --preference LeastWalking --max-walking-minutes 15
     londonjourneycli tfl status --line victoria
     londonjourneycli --json tfl disruptions --mode tube,dlr,elizabeth-line,overground,tram
+    londonjourneycli --json tfl line-routes --line victoria
     londonjourneycli --json tfl nearby-stops --lat 51.505 --lon -0.087 --mode bus --limit 5
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl arrivals --stop 490000235N --line 43
