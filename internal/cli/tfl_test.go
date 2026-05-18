@@ -86,6 +86,8 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		{name: "stop-info", args: []string{"--json", "tfl", "stop-info", "--stop", "490G00008459"}, want: "490008459S", code: exitcode.OK},
 		{name: "stop-info output projection", args: []string{"--json", "--output", "id", "tfl", "stop-info", "--stop", "490G00008459"}, want: "\"490G00008459\"", code: exitcode.OK},
 		{name: "arrivals", args: []string{"tfl", "arrivals", "--stop", "490000139R", "--line", "43"}, want: "Friern Barnet", code: exitcode.OK},
+		{name: "arrivals query line", args: []string{"--json", "tfl", "arrivals", "--query", "London Bridge", "--line", "43"}, want: "\"resolvedStop\": {", code: exitcode.OK},
+		{name: "arrivals query no line", args: []string{"--json", "tfl", "arrivals", "--query", "London Bridge"}, want: "\"status\": \"ok\"", code: exitcode.OK},
 		{name: "next arrival query", args: []string{"--json", "tfl", "next-arrival", "--query", "London Bridge", "--line", "43"}, want: "\"resolvedStop\": {", code: exitcode.OK},
 		{name: "journey", args: []string{"tfl", "journey", "--from", "London Bridge", "--to", "Paddington"}, want: "Option 1", code: exitcode.OK},
 		{name: "watch", args: []string{"--json", "tfl", "watch-arrival", "--stop", "490000139R", "--line", "43", "--threshold", "2m", "--dry-run"}, want: "\"status\": \"due\"", code: exitcode.OK},
@@ -227,6 +229,57 @@ func TestTFLNextArrivalQueryStopNotFound(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("expected %q in %s", want, out.String())
 		}
+	}
+}
+
+func TestTFLArrivalsQueryStopNotFound(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("{\"Query\":\"Nowhere\",\"Total\":0,\"Matches\":[]}"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "arrivals", "--query", "Nowhere", "--line", "43"}, &out, &errb)
+	if code != exitcode.NoData {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	for _, want := range []string{"\"status\": \"stop_not_found\"", "\"query\": \"Nowhere\"", "TfL found no stop matching"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("expected %q in %s", want, out.String())
+		}
+	}
+	if strings.TrimSpace(errb.String()) != "" {
+		t.Fatalf("expected empty stderr for JSON no-data, got %s", errb.String())
+	}
+}
+
+func TestTFLArrivalsQueryNoData(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("{\"Query\":\"London Bridge\",\"Total\":1,\"Matches\":[{\"ID\":\"490000139R\",\"Name\":\"London Bridge Station\",\"Modes\":[\"bus\"]}]}"))
+	})
+	mux.HandleFunc("/Line/43/Arrivals/490000139R", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[]"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "arrivals", "--query", "London Bridge", "--line", "43"}, &out, &errb)
+	if code != exitcode.NoData {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	for _, want := range []string{"\"status\": \"no_data\"", "\"resolvedStop\": {", "no matching arrivals"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("expected %q in %s", want, out.String())
+		}
+	}
+	if strings.TrimSpace(errb.String()) != "" {
+		t.Fatalf("expected empty stderr for JSON no-data, got %s", errb.String())
 	}
 }
 

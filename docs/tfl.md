@@ -49,9 +49,12 @@ Use nearby-stops when an agent has coordinates from a resolved address/current l
 
     londonjourneycli tfl arrivals --stop 490000235N --line 43
     londonjourneycli tfl arrivals --stop 490000235N --line 43 --direction inbound
+    londonjourneycli --json tfl arrivals --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
 
 When --line is provided, arrivals uses TfL's line-specific arrivals endpoint rather than fetching every prediction for the stop and filtering locally.
+
+Use arrivals --query when the user gave a stop/station name and you need the upcoming predictions, not just the next vehicle. It searches candidate stops with the optional line/mode filters, checks each candidate for live arrivals, and uses the same parent/child stop fallback as next-arrival. Query mode defaults to bus stops; pass --mode all or a rail/tube mode for non-bus lines. In JSON mode, --query returns a structured object with status, resolvedStop, candidates, next, and arrivals; --stop keeps the raw arrivals array for compatibility.
 
 Use next-arrival for assistant-style requests such as "next N3 from Ildersly Grove". It resolves the stop query with the line filter, checks candidate stops for actual predictions, and returns the selected stop plus the next arrivals in one JSON payload. Query mode defaults to bus stops; pass --mode all or a rail/tube mode for non-bus lines. It checks up to five candidates by default; lower --search-limit for tighter cron checks when the stop name is unambiguous.
 

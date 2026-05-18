@@ -952,23 +952,43 @@ func tflArrivals(ctx context.Context, g globals, client *tfl.Client, args []stri
 	fs := flag.NewFlagSet("arrivals", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	stop := fs.String("stop", "", "TfL stop ID")
+	query := fs.String("query", "", "stop/station search query")
 	line := fs.String("line", "", "line filter")
 	towards := fs.String("towards", "", "towards/destination substring")
 	direction := fs.String("direction", "", "line-arrivals direction: inbound, outbound, or all")
 	destinationStop := fs.String("destination-stop", "", "TfL destination stop ID for line-arrivals filtering")
+	mode := fs.String("mode", "bus", "stop-search modes for --query, or all")
+	searchLimit := fs.Int("search-limit", 5, "maximum stop-search candidates for --query")
 	limit := fs.Int("limit", 5, "maximum arrivals")
 	if err := fs.Parse(args); err != nil {
 		return exitcode.Usage
 	}
-	if *stop == "" {
-		fmt.Fprintln(stderr, "--stop is required")
+	if (*stop == "") == (*query == "") {
+		fmt.Fprintln(stderr, "provide exactly one of --stop or --query")
 		return exitcode.Usage
 	}
 	if *limit < 0 {
 		fmt.Fprintln(stderr, "--limit must be >= 0")
 		return exitcode.Usage
 	}
-	arrivals, err := client.LineArrivals(ctx, *stop, csvArgs(*line), *direction, *destinationStop)
+	if *query != "" && *limit == 0 {
+		fmt.Fprintln(stderr, "--limit must be > 0 with --query")
+		return exitcode.Usage
+	}
+	if *query != "" && *searchLimit <= 0 {
+		fmt.Fprintln(stderr, "--search-limit must be > 0")
+		return exitcode.Usage
+	}
+	found, err := findArrivals(ctx, client, arrivalLookup{
+		StopID:          *stop,
+		Query:           *query,
+		Lines:           csvArgs(*line),
+		Towards:         *towards,
+		Direction:       *direction,
+		DestinationStop: *destinationStop,
+		SearchModes:     queryModes(*mode),
+		SearchLimit:     *searchLimit,
+	})
 	if err != nil {
 		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
 			return code
@@ -976,9 +996,46 @@ func tflArrivals(ctx context.Context, g globals, client *tfl.Client, args []stri
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
-	arrivals = tfl.FilterArrivals(arrivals, "", *towards)
+	if !found.StopFound {
+		result := nextArrivalResult{Status: "stop_not_found", Message: fmt.Sprintf("TfL found no stop matching %q.", *query), Line: *line, Query: found.Query, Candidates: found.Candidates, Arrivals: []tfl.Arrival{}}
+		if code := writeNextArrivalResult(g, stdout, stderr, result); code != exitcode.OK {
+			return code
+		}
+		return exitcode.NoData
+	}
+	arrivals := found.Arrivals
 	if *limit < len(arrivals) {
 		arrivals = arrivals[:*limit]
+	}
+	if arrivals == nil {
+		arrivals = []tfl.Arrival{}
+	}
+	if *query != "" && g.format == output.JSON {
+		status := "no_data"
+		message := fmt.Sprintf("TfL found %d candidate stops for %q, but no matching arrivals.", found.Candidates, found.Query)
+		code := exitcode.NoData
+		if len(arrivals) > 0 {
+			status = "ok"
+			message = fmt.Sprintf("TfL found %d arrivals from %s.", len(arrivals), resolvedStopLabel(found.Stop, found.Query))
+			code = exitcode.OK
+		}
+		result := nextArrivalResult{Status: status, Message: message, Line: *line, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrivals: arrivals}
+		if len(arrivals) > 0 {
+			next := arrivals[0]
+			result.Next = &next
+		}
+		if writeCode := writeNextArrivalResult(g, stdout, stderr, result); writeCode != exitcode.OK {
+			return writeCode
+		}
+		return code
+	}
+	if *query != "" && len(arrivals) == 0 {
+		if g.format == output.Plain {
+			_ = output.WritePlainRows(stdout, [][]string{{"no_data", fmt.Sprintf("TfL found %d candidate stops for %q, but no matching arrivals.", found.Candidates, found.Query)}})
+		} else {
+			fmt.Fprintf(stdout, "TfL found %d candidate stops for %q, but no matching arrivals.\n", found.Candidates, found.Query)
+		}
+		return exitcode.NoData
 	}
 	if g.format == output.JSON {
 		return writeJSON(g, stdout, stderr, arrivals)

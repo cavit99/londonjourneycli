@@ -64,6 +64,31 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 		body := "[{\"LineName\":\"N3\",\"DestinationName\":\"Bromley North\",\"StationName\":\"Ildersly Grove\",\"PlatformName\":\"WH\",\"Towards\":\"Crystal Palace\",\"ExpectedArrival\":\"2026-05-18T01:04:00Z\",\"TimeToStation\":240,\"VehicleID\":\"n3\"}]"
 		_, _ = w.Write([]byte(body))
 	})
+	mux.HandleFunc("/StopPoint/490G00008459/Arrivals", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	})
+	mux.HandleFunc("/StopPoint/490008459S/Arrivals", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body := "[{\"LineName\":\"N3\",\"DestinationName\":\"Bromley North\",\"StationName\":\"Ildersly Grove\",\"PlatformName\":\"WH\",\"Towards\":\"Crystal Palace\",\"ExpectedArrival\":\"2026-05-18T01:04:00Z\",\"TimeToStation\":240,\"VehicleID\":\"n3\"}]"
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/StopPoint/490GSKIP", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{\"id\":\"490GSKIP\",\"commonName\":\"Mixed Parent\",\"children\":[{\"id\":\"490BAD\",\"commonName\":\"Bad Child\",\"modes\":[\"bus\"]},{\"id\":\"490GOOD\",\"commonName\":\"Good Child\",\"modes\":[\"bus\"]}]}"))
+	})
+	mux.HandleFunc("/Line/N3/Arrivals/490GSKIP", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	})
+	mux.HandleFunc("/Line/N3/Arrivals/490BAD", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad child", http.StatusBadGateway)
+	})
+	mux.HandleFunc("/Line/N3/Arrivals/490GOOD", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body := "[{\"LineName\":\"N3\",\"DestinationName\":\"Bromley North\",\"StationName\":\"Good Child\",\"PlatformName\":\"G\",\"Towards\":\"Crystal Palace\",\"ExpectedArrival\":\"2026-05-18T01:02:00Z\",\"TimeToStation\":120,\"VehicleID\":\"good\"}]"
+		_, _ = w.Write([]byte(body))
+	})
 	mux.HandleFunc("/StopPoint/490GEMPTY", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte("{\"id\":\"490GEMPTY\",\"commonName\":\"Empty Parent\",\"children\":[{\"id\":\"490EMPTYA\",\"commonName\":\"Empty Child\",\"modes\":[\"bus\"]}]}"))
@@ -179,6 +204,20 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	}
 	if len(fallbackArrivals) != 1 || fallbackArrivals[0].PlatformName != "WH" {
 		t.Fatalf("unexpected child fallback arrivals: %+v", fallbackArrivals)
+	}
+	plainFallbackArrivals, err := c.LineArrivals(context.Background(), "490G00008459", nil, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plainFallbackArrivals) != 1 || plainFallbackArrivals[0].PlatformName != "WH" {
+		t.Fatalf("unexpected no-line child fallback arrivals: %+v", plainFallbackArrivals)
+	}
+	mixedFallbackArrivals, err := c.LineArrivals(context.Background(), "490GSKIP", []string{"N3"}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mixedFallbackArrivals) != 1 || mixedFallbackArrivals[0].PlatformName != "G" {
+		t.Fatalf("expected good child arrival despite bad sibling, got %+v", mixedFallbackArrivals)
 	}
 	emptyFallbackArrivals, err := c.LineArrivals(context.Background(), "490GEMPTY", []string{"N3"}, "", "")
 	if err != nil {
