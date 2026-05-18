@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -768,6 +770,7 @@ func tflNearbyStops(ctx context.Context, g globals, client *tfl.Client, args []s
 	fs.SetOutput(stderr)
 	lat := fs.Float64("lat", 0, "latitude")
 	lon := fs.Float64("lon", 0, "longitude")
+	location := fs.String("location", "", "location text, map link, geo URI, or lat,lon")
 	radius := fs.Int("radius", 500, "search radius in metres")
 	mode := fs.String("mode", "bus", "comma-separated modes")
 	stopTypes := fs.String("stop-type", "NaptanPublicBusCoachTram", "comma-separated TfL stop types")
@@ -775,8 +778,26 @@ func tflNearbyStops(ctx context.Context, g globals, client *tfl.Client, args []s
 	if err := fs.Parse(args); err != nil {
 		return exitcode.Usage
 	}
-	if !flagSeen(fs, "lat") || !flagSeen(fs, "lon") {
-		fmt.Fprintln(stderr, "--lat and --lon are required")
+	latSeen := flagSeen(fs, "lat")
+	lonSeen := flagSeen(fs, "lon")
+	if strings.TrimSpace(*location) != "" {
+		if latSeen || lonSeen {
+			fmt.Fprintln(stderr, "--location cannot be combined with --lat or --lon")
+			return exitcode.Usage
+		}
+		parsedLat, parsedLon, err := parseLocationArg(*location)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitcode.Usage
+		}
+		*lat = parsedLat
+		*lon = parsedLon
+	} else if !latSeen || !lonSeen {
+		fmt.Fprintln(stderr, "provide --location or both --lat and --lon")
+		return exitcode.Usage
+	}
+	if err := validateLatLon(*lat, *lon); err != nil {
+		fmt.Fprintln(stderr, err)
 		return exitcode.Usage
 	}
 	if *radius <= 0 {
@@ -825,6 +846,166 @@ func stopDistanceMeters(stop tfl.StopPoint) float64 {
 		return 0
 	}
 	return *stop.Distance
+}
+
+var (
+	coordPairPattern         = regexp.MustCompile(`([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)`)
+	coordPairAnchoredPattern = regexp.MustCompile(`^\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*$`)
+	latLabelPattern          = regexp.MustCompile(`(?i)\b(?:LocationLat|latitude|lat)\s*[:=]\s*([-+]?\d+(?:\.\d+)?)`)
+	lonLabelPattern          = regexp.MustCompile(`(?i)\b(?:LocationLon|longitude|lon|lng)\s*[:=]\s*([-+]?\d+(?:\.\d+)?)`)
+)
+
+func parseLocationArg(value string) (float64, float64, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, 0, errors.New("--location cannot be empty")
+	}
+	if lat, lon, ok := parseLabelledLocation(trimmed); ok {
+		return lat, lon, validateLatLon(lat, lon)
+	}
+	if lat, lon, ok := parseOpenClawLocationText(trimmed); ok {
+		return lat, lon, validateLatLon(lat, lon)
+	}
+	if lat, lon, ok := parseMapURLLocation(trimmed); ok {
+		return lat, lon, validateLatLon(lat, lon)
+	}
+	if lat, lon, ok := parseStrictCommaLocation(trimmed); ok {
+		return lat, lon, validateLatLon(lat, lon)
+	}
+	if lat, lon, ok := parseSpaceLocation(trimmed); ok {
+		return lat, lon, validateLatLon(lat, lon)
+	}
+	return 0, 0, fmt.Errorf("could not parse --location as coordinates, geo URI, or map link: %q", trimmed)
+}
+
+func parseLabelledLocation(value string) (float64, float64, bool) {
+	latMatch := latLabelPattern.FindStringSubmatch(value)
+	lonMatch := lonLabelPattern.FindStringSubmatch(value)
+	if len(latMatch) < 2 || len(lonMatch) < 2 {
+		return 0, 0, false
+	}
+	lat, latErr := strconv.ParseFloat(latMatch[1], 64)
+	lon, lonErr := strconv.ParseFloat(lonMatch[1], 64)
+	if latErr != nil || lonErr != nil {
+		return 0, 0, false
+	}
+	return lat, lon, true
+}
+
+func parseOpenClawLocationText(value string) (float64, float64, bool) {
+	trimmed := strings.TrimSpace(value)
+	for _, prefix := range []string{"📍", "🛰 Live location:"} {
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		if idx := strings.Index(rest, "±"); idx >= 0 {
+			rest = strings.TrimSpace(rest[:idx])
+		}
+		return parseStrictCommaLocation(rest)
+	}
+	return 0, 0, false
+}
+
+func parseMapURLLocation(value string) (float64, float64, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme == "" {
+		return 0, 0, false
+	}
+	if strings.EqualFold(parsed.Scheme, "geo") {
+		for _, key := range []string{"q", "query"} {
+			if raw := parsed.Query().Get(key); raw != "" {
+				if lat, lon, ok := parseCommaLocation(raw); ok {
+					return lat, lon, true
+				}
+			}
+		}
+		return parseCommaLocation(parsed.Opaque)
+	}
+	query := parsed.Query()
+	for _, key := range []string{"q", "query", "ll", "center", "destination", "origin", "daddr", "saddr"} {
+		if raw := query.Get(key); raw != "" {
+			if lat, lon, ok := parseCommaLocation(raw); ok {
+				return lat, lon, true
+			}
+		}
+	}
+	if !isKnownCoordinateMapHost(parsed.Host) {
+		return 0, 0, false
+	}
+	decoded, err := url.QueryUnescape(value)
+	if err == nil {
+		if lat, lon, ok := parseCommaLocation(decoded); ok {
+			return lat, lon, true
+		}
+	}
+	return parseCommaLocation(value)
+}
+
+func isKnownCoordinateMapHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return false
+	}
+	return host == "maps.apple.com" ||
+		strings.HasSuffix(host, ".maps.apple.com") ||
+		host == "google.com" ||
+		strings.HasSuffix(host, ".google.com") ||
+		host == "goo.gl" ||
+		strings.HasSuffix(host, ".goo.gl")
+}
+
+func parseStrictCommaLocation(value string) (float64, float64, bool) {
+	match := coordPairAnchoredPattern.FindStringSubmatch(value)
+	if len(match) < 3 {
+		return 0, 0, false
+	}
+	lat, latErr := strconv.ParseFloat(match[1], 64)
+	lon, lonErr := strconv.ParseFloat(match[2], 64)
+	if latErr != nil || lonErr != nil {
+		return 0, 0, false
+	}
+	return lat, lon, true
+}
+
+func parseCommaLocation(value string) (float64, float64, bool) {
+	match := coordPairPattern.FindStringSubmatch(value)
+	if len(match) < 3 {
+		return 0, 0, false
+	}
+	lat, latErr := strconv.ParseFloat(match[1], 64)
+	lon, lonErr := strconv.ParseFloat(match[2], 64)
+	if latErr != nil || lonErr != nil {
+		return 0, 0, false
+	}
+	return lat, lon, true
+}
+
+func parseSpaceLocation(value string) (float64, float64, bool) {
+	if strings.ContainsAny(value, ":/?&=") {
+		return 0, 0, false
+	}
+	parts := strings.Fields(strings.TrimSpace(value))
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	lat, latErr := strconv.ParseFloat(strings.TrimSuffix(parts[0], ","), 64)
+	lon, lonErr := strconv.ParseFloat(strings.TrimSuffix(parts[1], ","), 64)
+	if latErr != nil || lonErr != nil {
+		return 0, 0, false
+	}
+	return lat, lon, true
+}
+
+func validateLatLon(lat, lon float64) error {
+	if lat < -90 || lat > 90 {
+		return fmt.Errorf("latitude must be between -90 and 90, got %.6f", lat)
+	}
+	if lon < -180 || lon > 180 {
+		return fmt.Errorf("longitude must be between -180 and 180, got %.6f", lon)
+	}
+	return nil
 }
 
 func flagSeen(fs *flag.FlagSet, name string) bool {
@@ -1730,7 +1911,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  tfl status [--line ID]       Show live TfL line status")
 	fmt.Fprintln(w, "  tfl disruptions [--line ID]  Show active TfL disruptions")
 	fmt.Fprintln(w, "  tfl line-routes --line ID    Show line route sections")
-	fmt.Fprintln(w, "  tfl nearby-stops --lat --lon Find stops near coordinates")
+	fmt.Fprintln(w, "  tfl nearby-stops <coords>    Find stops near coordinates")
 	fmt.Fprintln(w, "  tfl stop-search <query>      Search TfL stops and stations")
 	fmt.Fprintln(w, "  tfl stop-info --stop ID      Show a stop point and child stops")
 	fmt.Fprintln(w, "  tfl arrivals --stop ID       Show live arrivals")
