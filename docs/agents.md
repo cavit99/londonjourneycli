@@ -23,9 +23,9 @@ JSON mode structures TfL API errors and request failures. Journey planning can r
 
 Use tfl status and tfl disruptions before giving time-sensitive route advice when delays would change the recommendation.
 Use tfl line-routes when choosing or explaining line direction, termini, or service sections.
-Use tfl arrivals --query when the user gives a stop/station name and the agent needs several upcoming predictions without first running stop-search.
+Use tfl arrivals --query when the user gives a stop/station name and the agent needs several upcoming predictions without first running stop-search. Query arrivals default to bus stop search; pass --mode tube, --mode all, etc. for non-bus stops.
 
-Use tfl nearby-stops when the user gives a current GPS/location coordinate or when a resolved address yields coordinates and the agent needs concrete stop IDs nearby. Prefer --location for OpenClaw/WhatsApp location context text, geo: URIs, or map links that already contain coordinates; use --lat/--lon only when the coordinates are already split.
+Use tfl nearby-stops when the user gives a current GPS/location coordinate or when a resolved address yields coordinates and the agent needs concrete stop IDs nearby. Prefer --location for OpenClaw/WhatsApp pin text such as "📍 51.433533, -0.095258", geo: URIs, or map links with embedded coordinates; use --lat/--lon for separate LocationLat/LocationLon fields.
 
 ## Time-Critical Alerts
 

@@ -14,7 +14,16 @@ Use LondonJourneyCLI as the deterministic transport runtime. Agents own fuzzy in
 
        londonjourneycli --json tfl next-arrival --query "<stop name>" --line <line>
 
-5. For time-critical alerts, use `watch-arrival` only with visible delivery or `--dry-run` in tests. Silent unattended transport alerts are a bug.
+5. For several predictions from a named stop, use:
+
+       londonjourneycli --json tfl arrivals --query "<stop name>" --line <line>
+
+6. For current-location/nearby-stop requests, pass the shared location or coordinates:
+
+       londonjourneycli --json tfl nearby-stops --location "📍 51.433533, -0.095258" --mode bus --limit 5
+
+7. `--query` arrival commands default to bus stop search. For rail/tube/DLR/Elizabeth line/Overground/tram stops, pass the matching `--mode` or `--mode all`.
+8. For time-critical alerts, use `watch-arrival` only with visible delivery or `--dry-run` in tests. Silent unattended transport alerts are a bug.
 
 ## Ambiguous TfL Results
 
@@ -31,7 +40,8 @@ Agent rule: do not paste the raw ambiguity list to the user unless needed. Pick 
 - `tfl journey`: success returns `journeys[]`; `ambiguous` means resolve place and retry.
 - `tfl status` / `tfl disruptions`: use before or after journey planning when the user cares about reliability, delays, or whether a route is likely to work.
 - `tfl line-routes`: use to inspect line termini/directions before applying direction filters.
-- `tfl nearby-stops`: use when you have coordinates and need concrete stop IDs around a resolved address/current location.
+- `tfl nearby-stops`: use when you have coordinates and need concrete stop IDs around a resolved address/current location. Prefer `--location` for OpenClaw/WhatsApp pin text, `geo:` URIs, or map links with embedded coordinates; use `--lat`/`--lon` for separate LocationLat/LocationLon fields.
+- `tfl arrivals`: use `--query` for a named stop/station and `--stop` for a known stop ID. `--query` returns `status`, `resolvedStop`, `next`, and `arrivals`; `--stop` preserves the raw arrivals array for compatibility.
 - `tfl next-arrival`: `ok` has `next`; `no_data` means the stop resolved but no matching prediction; `stop_not_found` means the stop query itself failed.
 - `tfl watch-arrival`: `due`, `delayed`, `no_data`, `stop_not_found`, and `api_failed` are all user-visible terminal states when delivery is configured.
 

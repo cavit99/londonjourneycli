@@ -172,6 +172,6 @@ For a concise public summary and demo commands, see [docs/share.md](docs/share.m
 - docs: agent, spec, skill, TfL, and troubleshooting docs
 - examples: example LondonJourneyCLI-compatible skills
 
-## Status
+## Scope
 
-First public cut. The scope is intentionally small: a solid registry/runner plus a real TfL module. More providers should earn their way in through manifests and tests, not by expanding the core until it becomes mush.
+LondonJourneyCLI stays intentionally narrow: a solid registry/runner plus a real TfL module for London journey planning, live arrivals, nearby stops, line health, and visible transport alerts. More providers should earn their way in through manifests and tests, not by expanding the core until it becomes mush.
