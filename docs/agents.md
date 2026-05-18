@@ -25,7 +25,7 @@ Use tfl status and tfl disruptions before giving time-sensitive route advice whe
 Use tfl line-routes when choosing or explaining line direction, termini, or service sections.
 Use tfl arrivals --query when the user gives a stop/station name and the agent needs several upcoming predictions without first running stop-search.
 
-Use tfl nearby-stops when the user gives a current GPS/location coordinate or when a resolved address yields coordinates and the agent needs concrete stop IDs nearby.
+Use tfl nearby-stops when the user gives a current GPS/location coordinate or when a resolved address yields coordinates and the agent needs concrete stop IDs nearby. Prefer --location for OpenClaw/WhatsApp location context text, geo: URIs, or map links that already contain coordinates; use --lat/--lon only when the coordinates are already split.
 
 ## Time-Critical Alerts
 
