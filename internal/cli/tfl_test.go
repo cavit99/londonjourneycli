@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cavit99/londonjourneycli/internal/exitcode"
 )
@@ -135,6 +136,7 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		{name: "next arrival query", args: []string{"--json", "tfl", "next-arrival", "--query", "London Bridge", "--line", "43"}, want: "\"resolvedStop\": {", code: exitcode.OK},
 		{name: "journey", args: []string{"tfl", "journey", "--from", "London Bridge", "--to", "Paddington"}, want: "Option 1", code: exitcode.OK},
 		{name: "station fare json", args: []string{"--json", "tfl", "fare", "--from", "Tottenham Hale", "--from-id", "940GZZLUTMH", "--to", "Oxford Circus", "--to-id", "940GZZLUOXC", "--date", "20260519", "--time", "0800", "--mode", "tube"}, want: "\"amountPence\": 390", code: exitcode.OK},
+		{name: "station fare cash unsupported", args: []string{"--json", "tfl", "fare", "--from", "Tottenham Hale", "--from-id", "940GZZLUTMH", "--to", "Oxford Circus", "--to-id", "940GZZLUOXC", "--payment", "cash", "--mode", "tube"}, want: "\"status\": \"unsupported\"", code: exitcode.NoData},
 		{name: "station fare missing from json", args: []string{"--json", "tfl", "fare", "--from", "Missing Station", "--to", "Oxford Circus", "--to-id", "940GZZLUOXC", "--mode", "tube"}, want: "\"status\": \"station_not_found\"", code: exitcode.NoData},
 		{name: "station fare missing from json envelope", args: []string{"--json", "--envelope", "tfl", "fare", "--from", "Missing Station", "--to", "Oxford Circus", "--to-id", "940GZZLUOXC", "--mode", "tube"}, want: "\"ok\": false", code: exitcode.NoData},
 		{name: "station fare plain", args: []string{"--plain", "tfl", "fares", "--from", "Tottenham Hale", "--from-id", "940GZZLUTMH", "--to", "Oxford Circus", "--to-id", "940GZZLUOXC", "--date", "20260519", "--time", "0800", "--mode", "tube"}, want: "ok\tjourney\tPeak\tcontactless,oyster\tpeak\t£3.90", code: exitcode.OK},
@@ -168,6 +170,123 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 	}
 
 	_ = os.Getenv("TFL_BASE_URL")
+}
+
+func TestTFLArrivalsHumanUsesLondonClock(t *testing.T) {
+	oldLocal := time.Local
+	time.Local = time.UTC
+	defer func() { time.Local = oldLocal }()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Line/43/Arrivals/490000139R", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body := `[{"LineName":"43","DestinationName":"Friern Barnet","StationName":"London Bridge Bus Station","PlatformName":"D","Towards":"Old Street","ExpectedArrival":"2026-05-18T01:01:00Z","TimeToStation":60,"VehicleID":"b"}]`
+		_, _ = w.Write([]byte(body))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"tfl", "arrivals", "--stop", "490000139R", "--line", "43"}, &out, &errb)
+	if code != exitcode.OK {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "\t02:01") {
+		t.Fatalf("expected London clock time in %q", out.String())
+	}
+}
+
+func TestTFLCompareRanksJourneysAndShapesJSON(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Journey/JourneyResults/1000139/to/1000174", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("includeAlternativeRoutes"); got != "true" {
+			t.Fatalf("includeAlternativeRoutes=%q", got)
+		}
+		if got := r.URL.Query().Get("journeyPreference"); got != "LeastTime" {
+			t.Fatalf("journeyPreference=%q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Journeys":[
+			{"StartDateTime":"2026-05-18T08:00:00","ArrivalDateTime":"2026-05-18T08:25:00","Duration":25,"Fare":{"TotalCost":280},"Legs":[
+				{"Mode":{"Name":"walking"},"DepartureTime":"2026-05-18T08:00:00","ArrivalTime":"2026-05-18T08:10:00","Duration":10,"DeparturePoint":{"CommonName":"London Bridge"},"ArrivalPoint":{"CommonName":"London Bridge Underground Station"},"RouteOptions":[]},
+				{"Mode":{"Name":"tube"},"DepartureTime":"2026-05-18T08:10:00","ArrivalTime":"2026-05-18T08:25:00","Duration":15,"DeparturePoint":{"CommonName":"London Bridge Underground Station"},"ArrivalPoint":{"CommonName":"Paddington Underground Station"},"RouteOptions":[{"Name":"Jubilee"}]}
+			]},
+			{"StartDateTime":"2026-05-18T08:01:00","ArrivalDateTime":"2026-05-18T08:33:00","Duration":32,"Fare":{"TotalCost":320},"Legs":[
+				{"Mode":{"Name":"walking"},"DepartureTime":"2026-05-18T08:01:00","ArrivalTime":"2026-05-18T08:02:00","Duration":1,"DeparturePoint":{"CommonName":"London Bridge"},"ArrivalPoint":{"CommonName":"London Bridge Underground Station"},"RouteOptions":[]},
+				{"Mode":{"Name":"tube"},"DepartureTime":"2026-05-18T08:02:00","ArrivalTime":"2026-05-18T08:17:00","Duration":15,"DeparturePoint":{"CommonName":"London Bridge Underground Station"},"ArrivalPoint":{"CommonName":"Baker Street Underground Station"},"RouteOptions":[{"Name":"Jubilee"}]},
+				{"Mode":{"Name":"tube"},"DepartureTime":"2026-05-18T08:18:00","ArrivalTime":"2026-05-18T08:32:00","Duration":14,"DeparturePoint":{"CommonName":"Baker Street Underground Station"},"ArrivalPoint":{"CommonName":"Paddington Underground Station"},"RouteOptions":[{"Name":"Circle"}]},
+				{"Mode":{"Name":"walking"},"DepartureTime":"2026-05-18T08:32:00","ArrivalTime":"2026-05-18T08:33:00","Duration":1,"DeparturePoint":{"CommonName":"Paddington Underground Station"},"ArrivalPoint":{"CommonName":"Paddington"},"RouteOptions":[]}
+			]},
+			{"StartDateTime":"2026-05-18T08:04:00","ArrivalDateTime":"2026-05-18T08:32:00","Duration":28,"Fare":{"TotalCost":175},"Legs":[
+				{"Mode":{"Name":"walking"},"DepartureTime":"2026-05-18T08:04:00","ArrivalTime":"2026-05-18T08:09:00","Duration":5,"DeparturePoint":{"CommonName":"London Bridge"},"ArrivalPoint":{"CommonName":"Bus stop"},"RouteOptions":[]},
+				{"Mode":{"Name":"bus"},"DepartureTime":"2026-05-18T08:09:00","ArrivalTime":"2026-05-18T08:32:00","Duration":23,"DeparturePoint":{"CommonName":"Bus stop"},"ArrivalPoint":{"CommonName":"Paddington"},"RouteOptions":[{"Name":"205"}]}
+			]}
+		]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "compare", "--from", "London Bridge", "--to", "Paddington", "--rank", "least-walking", "--include-alternatives"}, &out, &errb)
+	if code != exitcode.OK {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	var result struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		From    string `json:"from"`
+		To      string `json:"to"`
+		Ranking string `json:"ranking"`
+		Options []struct {
+			Rank             int               `json:"rank"`
+			Score            int               `json:"score"`
+			Reasons          []string          `json:"reasons"`
+			Duration         int               `json:"duration"`
+			WalkingMinutes   int               `json:"walkingMinutes"`
+			InterchangeCount int               `json:"interchangeCount"`
+			Modes            []string          `json:"modes"`
+			Lines            []string          `json:"lines"`
+			Fare             *json.RawMessage  `json:"fare"`
+			Legs             []json.RawMessage `json:"legs"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out.String())
+	}
+	if result.Status != "ok" || result.From != "London Bridge" || result.To != "Paddington" || result.Ranking != "least-walking" {
+		t.Fatalf("unexpected result envelope: %+v", result)
+	}
+	if len(result.Options) != 3 {
+		t.Fatalf("options=%d result=%+v", len(result.Options), result)
+	}
+	top := result.Options[0]
+	if top.Rank != 1 || top.Score != 2 || top.Duration != 32 || top.WalkingMinutes != 2 || top.InterchangeCount != 1 {
+		t.Fatalf("unexpected top option: %+v", top)
+	}
+	if !strings.Contains(strings.Join(top.Lines, ","), "Circle") || top.Fare == nil || len(top.Legs) != 4 {
+		t.Fatalf("missing top option shape: %+v", top)
+	}
+	if !strings.Contains(strings.Join(top.Reasons, " "), "2 min walking") || !strings.Contains(result.Message, "ranked by least-walking") {
+		t.Fatalf("missing reasons/message: %+v message=%q", top.Reasons, result.Message)
+	}
+	if result.Options[1].Duration != 28 || result.Options[2].Duration != 25 {
+		t.Fatalf("least-walking order durations=%d,%d,%d", result.Options[0].Duration, result.Options[1].Duration, result.Options[2].Duration)
+	}
+
+	out.Reset()
+	errb.Reset()
+	code = Run(context.Background(), []string{"--json", "tfl", "compare", "--from", "London Bridge", "--to", "Paddington", "--rank", "fastest", "--include-alternatives"}, &out, &errb)
+	if code != exitcode.OK {
+		t.Fatalf("fastest code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("fastest unmarshal: %v\n%s", err, out.String())
+	}
+	if result.Options[0].Duration != 25 || result.Options[0].Rank != 1 {
+		t.Fatalf("fastest order top=%+v", result.Options[0])
+	}
 }
 
 func TestTFLAccessibleStationsNearRequiresLiftSortsAfterFiltering(t *testing.T) {

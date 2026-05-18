@@ -1,6 +1,6 @@
 # londonjourneycli
 
-A small Go CLI that turns TfL's endpoint-shaped API into task-shaped tools for agents: plan journeys, resolve named stops, read live arrivals, price fares, find nearby stops from shared locations, discover accessible stations, and run one-shot transport checks.
+A small Go CLI that turns TfL's endpoint-shaped API into task-shaped tools for agents: plan and compare journeys, resolve named stops, read live arrivals, price fares, find nearby stops from shared locations, discover accessible stations, and run one-shot transport checks.
 
 It also includes a narrow skill manifest runner so an agent can discover, test, and call the transport skill without relying on prose alone.
 
@@ -8,10 +8,11 @@ It also includes a narrow skill manifest runner so an agent can discover, test, 
 
 Human transport requests are not endpoint-shaped. "Next N3 from Ildersly Grove", "what's the fare from Zone 3 to Oxford Circus?", "which stations near here have lifts?", and "tell me when the bus is nearly here" all require API choreography before an agent can give a useful answer.
 
-LondonJourneyCLI packages those workflows into commands that return answer-shaped data. An agent can spend its tokens on judgement and explanation instead of repeatedly rediscovering TfL mode parameters, StopPoint IDs, parent/child stop behavior, fare caveats, and accessibility metadata.
+LondonJourneyCLI packages those workflows into commands that return answer-shaped data. An agent can spend its tokens on judgement and explanation instead of repeatedly rediscovering TfL mode parameters, StopPoint IDs, parent/child stop behavior, route ranking, fare caveats, and accessibility metadata.
 
 It is useful when an agent needs to:
 
+- compare and rank TfL journey options without writing scoring glue
 - resolve a stop name plus line into the actual stop with live predictions
 - turn a WhatsApp/OpenClaw location share into nearby stops
 - find station candidates with lift/access fields without fetching heavyweight stop payloads
@@ -70,6 +71,7 @@ TfL examples:
     londonjourneycli --json tfl line-routes --line victoria
     londonjourneycli --json --output 0.lineStatuses.0.statusSeverityDescription tfl status --line victoria
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
+    londonjourneycli --json tfl compare --from "London Bridge" --to "Paddington" --rank balanced --include-alternatives
     londonjourneycli tfl journey --from "Westminster" --to "Waterloo" --preference LeastWalking --max-walking-minutes 15
     londonjourneycli --json tfl fare --from-zone 3 --to-zone 1 --period peak --payment contactless
     londonjourneycli --json tfl fare --from "Tottenham Hale Underground Station" --to "Oxford Circus Underground Station" --date 20260519 --time 0800 --mode tube
@@ -80,6 +82,7 @@ TfL examples:
 For agents:
 
 - Resolve fuzzy places before calling journey: turn "home", "office", venue names, and vague areas into exact addresses, postcodes, coordinates, or TfL IDs.
+- Use tfl compare when the user asks which route is best; JSON returns ranked options with score, reasons, duration, walking minutes, interchange count, modes, lines, fare when present, and legs.
 - If the user shared a WhatsApp/OpenClaw location, pass the coordinates or location context text to nearby-stops with --location.
 - For fare questions, prefer station-pair lookup with date/time when route, peak rules, or National Rail acceptance could matter; use zonal lookup for simple adult PAYG zone questions.
 - For accessible route planning, prefer journey's native --accessibility preferences with --between-entrances when station access matters.
@@ -105,6 +108,8 @@ SKILL.md remains the agent playbook. skill.yaml is the executable contract.
     commands:
       - name: journey
         exec: [londonjourneycli, tfl, journey]
+      - name: compare
+        exec: [londonjourneycli, tfl, compare]
     tests:
       - name: stop-search-smoke
         command: [londonjourneycli, --json, tfl, stop-search, London Bridge, --mode, "tube,bus", --limit, "1"]

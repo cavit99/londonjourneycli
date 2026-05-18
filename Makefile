@@ -3,6 +3,7 @@ BIN ?= londonjourneycli
 .PHONY: build test live-test fmt lint install clean
 
 build:
+	mkdir -p bin
 	go build -o bin/$(BIN) ./cmd/londonjourneycli
 
 test:

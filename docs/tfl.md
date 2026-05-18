@@ -19,11 +19,14 @@ Use line-routes when an agent needs line endpoints/directions to explain a servi
     londonjourneycli --json tfl journey --from "Westminster" --to "Waterloo"
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington" --preference LeastWalking --max-walking-minutes 15
     londonjourneycli tfl journey --from "London Bridge" --to "Heathrow T2" --mode tube,elizabeth-line --real-time
+    londonjourneycli --json tfl compare --from "London Bridge" --to "Paddington" --rank balanced --include-alternatives
+    londonjourneycli --plain tfl compare --from "Westminster" --to "Waterloo" --rank least-walking
 
 Known station aliases resolve to NaPTAN IDs for more reliable journey planning.
 
 Useful journey flags map directly to TfL Journey Planner parameters:
 
+- --rank fastest|fewest-changes|least-walking|balanced for compare output ranking
 - --via <point>
 - --preference LeastTime|LeastInterchange|LeastWalking
 - --mode tube,bus,elizabeth-line,national-rail,dlr,tram,walking,cycle
@@ -33,6 +36,8 @@ Useful journey flags map directly to TfL Journey Planner parameters:
 - --include-alternatives, --alternative-walking, --alternative-cycle
 - --real-time and --between-entrances
 - --local-only to disable TfL nationalSearch
+
+Use tfl compare when the caller needs route choice rather than raw TfL order. It reuses the journey flags, then returns ranked options with rank, score, reasons, duration, walkingMinutes, interchangeCount, modes, lines, fare when present, and legs. The --rank flag controls local scoring; --preference still controls the TfL Journey Planner request.
 
 ## Fares
 
