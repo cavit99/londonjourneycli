@@ -26,9 +26,10 @@ Registry:
 
 TfL:
 
-- londonjourneycli tfl stop-search <query> [--limit N]
-- londonjourneycli tfl arrivals --stop <id> [--line N] [--towards text] [--limit N]
-- londonjourneycli tfl journey --from <origin> --to <destination> [--date YYYYMMDD] [--time HHmm] [--arriving]
+- londonjourneycli tfl stop-search <query> [--mode modes] [--line lines] [--max-results N] [--include-hubs] [--limit N]
+- londonjourneycli tfl stop-info --stop <id>
+- londonjourneycli tfl arrivals --stop <id> [--line N] [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--limit N]
+- londonjourneycli tfl journey --from <origin> --to <destination> [--date YYYYMMDD] [--time HHmm] [--arriving] [--via point] [--preference LeastTime|LeastInterchange|LeastWalking] [--mode modes] [--accessibility prefs] [--max-walking-minutes N] [--walking-speed Slow|Average|Fast] [--real-time]
 - londonjourneycli tfl watch-arrival --stop <id> --line <line> [--towards text] [--threshold 2m] [--openclaw-channel whatsapp --openclaw-target <target>]
 
 watch-arrival requires --threshold > 0. In --no-input mode, it also requires complete OpenClaw delivery flags or --dry-run.

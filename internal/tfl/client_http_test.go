@@ -14,8 +14,44 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 		if got := r.URL.Query().Get("query"); got != "London Bridge" {
 			t.Fatalf("query=%q", got)
 		}
+		if modes := r.URL.Query()["modes"]; len(modes) > 0 {
+			t.Fatalf("default stop search should not force modes, got %v", modes)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte("{\"Query\":\"London Bridge\",\"Total\":1,\"Matches\":[{\"ID\":\"490000139R\",\"Name\":\"London Bridge Station\",\"Lat\":51.5,\"Lon\":-0.08,\"Modes\":[\"bus\"]}]}"))
+	})
+	mux.HandleFunc("/Line/43/Arrivals/490000139R", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("direction"); got != "inbound" {
+			t.Fatalf("direction=%q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/StopPoint/490G00008459", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{\"id\":\"490G00008459\",\"commonName\":\"Ildersly Grove\",\"children\":[{\"id\":\"490008459S\",\"commonName\":\"Ildersly Grove\",\"indicator\":\"Stop WH\",\"stopLetter\":\"WH\",\"lat\":51.43,\"lon\":-0.09,\"modes\":[\"bus\"]}]}"))
+	})
+	mux.HandleFunc("/Line/N3/Arrivals/490G00008459", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("null"))
+	})
+	mux.HandleFunc("/Line/N3/Arrivals/490008459S", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body := "[{\"LineName\":\"N3\",\"DestinationName\":\"Bromley North\",\"StationName\":\"Ildersly Grove\",\"PlatformName\":\"WH\",\"Towards\":\"Crystal Palace\",\"ExpectedArrival\":\"2026-05-18T01:04:00Z\",\"TimeToStation\":240,\"VehicleID\":\"n3\"}]"
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/StopPoint/490GEMPTY", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{\"id\":\"490GEMPTY\",\"commonName\":\"Empty Parent\",\"children\":[{\"id\":\"490EMPTYA\",\"commonName\":\"Empty Child\",\"modes\":[\"bus\"]}]}"))
+	})
+	mux.HandleFunc("/Line/N3/Arrivals/490GEMPTY", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("null"))
+	})
+	mux.HandleFunc("/Line/N3/Arrivals/490EMPTYA", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("null"))
 	})
 	mux.HandleFunc("/StopPoint/490000139R/Arrivals", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -52,6 +88,27 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	if arrivals[0].VehicleID != "b" {
 		t.Fatalf("arrivals not sorted: %+v", arrivals)
 	}
+	lineArrivals, err := c.LineArrivals(context.Background(), "490000139R", []string{"43"}, "inbound", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lineArrivals) != 1 || lineArrivals[0].LineName != "43" {
+		t.Fatalf("unexpected line arrivals: %+v", lineArrivals)
+	}
+	fallbackArrivals, err := c.LineArrivals(context.Background(), "490G00008459", []string{"N3"}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fallbackArrivals) != 1 || fallbackArrivals[0].PlatformName != "WH" {
+		t.Fatalf("unexpected child fallback arrivals: %+v", fallbackArrivals)
+	}
+	emptyFallbackArrivals, err := c.LineArrivals(context.Background(), "490GEMPTY", []string{"N3"}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emptyFallbackArrivals == nil || len(emptyFallbackArrivals) != 0 {
+		t.Fatalf("expected non-nil empty child fallback arrivals, got %+v", emptyFallbackArrivals)
+	}
 
 	journey, err := c.Journey(context.Background(), "London Bridge", "Paddington", JourneyOptions{})
 	if err != nil {
@@ -59,5 +116,46 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	}
 	if len(journey.Journeys) != 1 || journey.Journeys[0].Duration != 30 {
 		t.Fatalf("unexpected journey: %+v", journey)
+	}
+}
+
+func TestJourneyOptionsAreSentToTfL(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Journey/JourneyResults/1000139/to/1000174", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		for key, want := range map[string]string{
+			"journeyPreference":        "LeastWalking",
+			"via":                      "1000254",
+			"mode":                     "tube,bus",
+			"accessibilityPreference":  "NoEscalators,StepFreeToPlatform",
+			"maxWalkingMinutes":        "15",
+			"walkingSpeed":             "Fast",
+			"includeAlternativeRoutes": "true",
+			"useRealTimeLiveArrivals":  "true",
+		} {
+			if got := q.Get(key); got != want {
+				t.Fatalf("%s=%q want %q in %s", key, got, want, r.URL.RawQuery)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{\"Journeys\":[]}"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient("")
+	c.BaseURL = srv.URL
+	_, err := c.Journey(context.Background(), "London Bridge", "Paddington", JourneyOptions{
+		Via:                      "Waterloo",
+		Preference:               "LeastWalking",
+		Modes:                    []string{"tube,bus"},
+		AccessibilityPreferences: []string{"NoEscalators", "StepFreeToPlatform"},
+		MaxWalkingMinutes:        "15",
+		WalkingSpeed:             "Fast",
+		IncludeAlternativeRoutes: true,
+		UseRealTimeLiveArrivals:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

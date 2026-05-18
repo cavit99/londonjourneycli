@@ -21,6 +21,14 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
 		_, _ = w.Write([]byte(body))
 	})
+	mux.HandleFunc("/StopPoint/490G00008459", func(w http.ResponseWriter, r *http.Request) {
+		body := "{\"id\":\"490G00008459\",\"commonName\":\"Ildersly Grove\",\"children\":[{\"id\":\"490008459S\",\"commonName\":\"Ildersly Grove\",\"indicator\":\"Stop WH\",\"stopLetter\":\"WH\",\"lat\":51.43,\"lon\":-0.09,\"modes\":[\"bus\"]}]}"
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/Line/43/Arrivals/490000139R", func(w http.ResponseWriter, r *http.Request) {
+		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
+		_, _ = w.Write([]byte(body))
+	})
 	mux.HandleFunc("/Journey/JourneyResults/1000139/to/1000174", func(w http.ResponseWriter, r *http.Request) {
 		body := "{\"Journeys\":[{\"StartDateTime\":\"2026-05-18T01:00:00\",\"ArrivalDateTime\":\"2026-05-18T01:30:00\",\"Duration\":30,\"Legs\":[{\"Mode\":{\"Name\":\"tube\"},\"DepartureTime\":\"2026-05-18T01:00:00\",\"ArrivalTime\":\"2026-05-18T01:30:00\",\"DeparturePoint\":{\"CommonName\":\"London Bridge\"},\"ArrivalPoint\":{\"CommonName\":\"Paddington\"},\"RouteOptions\":[{\"Name\":\"Jubilee\"}]}]}]}"
 		_, _ = w.Write([]byte(body))
@@ -37,6 +45,7 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		code int
 	}{
 		{name: "search", args: []string{"--json", "tfl", "stop-search", "London Bridge", "--limit", "1"}, want: "London Bridge Station", code: exitcode.OK},
+		{name: "stop-info", args: []string{"--json", "tfl", "stop-info", "--stop", "490G00008459"}, want: "490008459S", code: exitcode.OK},
 		{name: "arrivals", args: []string{"tfl", "arrivals", "--stop", "490000139R", "--line", "43"}, want: "Friern Barnet", code: exitcode.OK},
 		{name: "journey", args: []string{"tfl", "journey", "--from", "London Bridge", "--to", "Paddington"}, want: "Option 1", code: exitcode.OK},
 		{name: "watch", args: []string{"--json", "tfl", "watch-arrival", "--stop", "490000139R", "--line", "43", "--threshold", "2m", "--dry-run"}, want: "\"status\": \"due\"", code: exitcode.OK},
@@ -69,6 +78,10 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 func TestTFLWatchArrivalSuccessfulOpenClawDelivery(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/StopPoint/490000139R/Arrivals", func(w http.ResponseWriter, r *http.Request) {
+		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/Line/43/Arrivals/490000139R", func(w http.ResponseWriter, r *http.Request) {
 		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
 		_, _ = w.Write([]byte(body))
 	})
@@ -133,7 +146,7 @@ func TestTFLWatchArrivalReportsNotificationFailure(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()
-			mux.HandleFunc("/StopPoint/490000139R/Arrivals", func(w http.ResponseWriter, r *http.Request) {
+			mux.HandleFunc("/Line/43/Arrivals/490000139R", func(w http.ResponseWriter, r *http.Request) {
 				if tc.response == "error" {
 					http.Error(w, "upstream failed", http.StatusBadGateway)
 					return
@@ -168,6 +181,10 @@ func TestTFLWatchArrivalReportsNotificationFailure(t *testing.T) {
 func TestTFLWatchArrivalPlainNotificationFailureIsSingleTSVRow(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/StopPoint/490000139R/Arrivals", func(w http.ResponseWriter, r *http.Request) {
+		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/Line/43/Arrivals/490000139R", func(w http.ResponseWriter, r *http.Request) {
 		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
 		_, _ = w.Write([]byte(body))
 	})

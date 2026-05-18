@@ -56,8 +56,10 @@ For your own skills:
 TfL examples:
 
     londonjourneycli tfl stop-search "London Bridge"
+    londonjourneycli tfl stop-search "Ildersly Grove" --mode bus --line N3
+    londonjourneycli --json tfl stop-info --stop 490G00008459
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
-    londonjourneycli tfl journey --from "Westminster" --to "Waterloo"
+    londonjourneycli tfl journey --from "Westminster" --to "Waterloo" --preference LeastWalking --max-walking-minutes 15
     londonjourneycli --json tfl arrivals --stop 490000235N --line 43
 
 ## Skill Manifests
@@ -81,7 +83,7 @@ SKILL.md remains the agent playbook. skill.yaml is the executable contract.
         exec: [londonjourneycli, tfl, journey]
     tests:
       - name: stop-search-smoke
-        command: [londonjourneycli, --json, tfl, stop-search, London Bridge, --limit, "1"]
+        command: [londonjourneycli, --json, tfl, stop-search, London Bridge, --mode, "tube,bus", --limit, "1"]
 
 Commands and tests are argv arrays, not shell strings. That is deliberate: no quoting lottery and no shell injection by default.
 

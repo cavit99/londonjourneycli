@@ -18,12 +18,15 @@ commands:
   - name: arrivals
     description: Check live arrivals at a stop.
     exec: [londonjourneycli, tfl, arrivals]
+  - name: stop-info
+    description: Inspect a stop point and its child stops.
+    exec: [londonjourneycli, tfl, stop-info]
   - name: watch-arrival
     description: Perform a one-shot live arrival check with optional visible delivery.
     exec: [londonjourneycli, tfl, watch-arrival]
 tests:
   - name: stop-search-smoke
-    command: [londonjourneycli, --json, tfl, stop-search, London Bridge, --limit, "1"]
+    command: [londonjourneycli, --json, tfl, stop-search, London Bridge, --mode, "tube,bus", --limit, "1"]
 verification:
   - Run go test ./...
   - Run LONDONJOURNEYCLI_LIVE_TFL=1 go test ./internal/tfl -run Live -count=1 -v before releasing TfL changes.

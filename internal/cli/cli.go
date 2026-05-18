@@ -475,7 +475,7 @@ func runArgvWithIO(ctx context.Context, argv []string, opts runOptions, stdout, 
 
 func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <stop-search|arrivals|journey|watch-arrival>")
+		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <stop-search|stop-info|arrivals|journey|watch-arrival>")
 		return exitcode.Usage
 	}
 	client := tfl.NewClient(os.Getenv("TFL_APP_KEY"))
@@ -485,6 +485,8 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 	switch args[0] {
 	case "stop-search":
 		return tflStopSearch(ctx, g, client, args[1:], stdout, stderr)
+	case "stop-info":
+		return tflStopInfo(ctx, g, client, args[1:], stdout, stderr)
 	case "arrivals":
 		return tflArrivals(ctx, g, client, args[1:], stdout, stderr)
 	case "journey":
@@ -497,23 +499,79 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 	}
 }
 
+func tflStopInfo(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("stop-info", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	stop := fs.String("stop", "", "TfL stop ID")
+	if err := fs.Parse(args); err != nil {
+		return exitcode.Usage
+	}
+	if *stop == "" {
+		fmt.Fprintln(stderr, "--stop is required")
+		return exitcode.Usage
+	}
+	info, err := client.StopPoint(ctx, *stop)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitcode.Network
+	}
+	if g.format == output.JSON {
+		_ = output.WriteJSON(stdout, info)
+		return exitcode.OK
+	}
+	if g.format == output.Plain {
+		rows := [][]string{{info.ID, info.CommonName, info.Indicator, info.StopLetter, fmt.Sprintf("%.5f", info.Lat), fmt.Sprintf("%.5f", info.Lon), strings.Join(info.Modes, ",")}}
+		for _, child := range info.Children {
+			rows = append(rows, []string{child.ID, child.CommonName, child.Indicator, child.StopLetter, fmt.Sprintf("%.5f", child.Lat), fmt.Sprintf("%.5f", child.Lon), strings.Join(child.Modes, ",")})
+		}
+		_ = output.WritePlainRows(stdout, rows)
+		return exitcode.OK
+	}
+	fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", info.ID, info.CommonName, info.Indicator, info.StopLetter)
+	for _, child := range info.Children {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", child.ID, child.CommonName, child.Indicator, child.StopLetter)
+	}
+	return exitcode.OK
+}
+
 func tflStopSearch(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
 	limit := 10
+	maxResults := 0
+	modes := ""
+	lines := ""
+	includeHubs := false
 	var queryParts []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--limit":
+		case "--limit", "--max-results", "--mode", "--line":
+			if i+1 >= len(args) {
+				fmt.Fprintf(stderr, "%s requires a value\n", args[i])
+				return exitcode.Usage
+			}
+			value := args[i+1]
 			i++
-			if i >= len(args) {
-				fmt.Fprintln(stderr, "--limit requires a value")
-				return exitcode.Usage
+			switch args[i-1] {
+			case "--limit":
+				n, err := strconv.Atoi(value)
+				if err != nil {
+					fmt.Fprintln(stderr, err)
+					return exitcode.Usage
+				}
+				limit = n
+			case "--max-results":
+				n, err := strconv.Atoi(value)
+				if err != nil {
+					fmt.Fprintln(stderr, err)
+					return exitcode.Usage
+				}
+				maxResults = n
+			case "--mode":
+				modes = appendCSV(modes, value)
+			case "--line":
+				lines = appendCSV(lines, value)
 			}
-			n, err := strconv.Atoi(args[i])
-			if err != nil {
-				fmt.Fprintln(stderr, err)
-				return exitcode.Usage
-			}
-			limit = n
+		case "--include-hubs":
+			includeHubs = true
 		default:
 			queryParts = append(queryParts, args[i])
 		}
@@ -522,11 +580,15 @@ func tflStopSearch(ctx context.Context, g globals, client *tfl.Client, args []st
 		fmt.Fprintln(stderr, "--limit must be >= 0")
 		return exitcode.Usage
 	}
-	if len(queryParts) == 0 {
-		fmt.Fprintln(stderr, "usage: londonjourneycli tfl stop-search <query>")
+	if maxResults < 0 {
+		fmt.Fprintln(stderr, "--max-results must be >= 0")
 		return exitcode.Usage
 	}
-	resp, err := client.StopSearch(ctx, strings.Join(queryParts, " "))
+	if len(queryParts) == 0 {
+		fmt.Fprintln(stderr, "usage: londonjourneycli tfl stop-search <query> [--mode bus,tube] [--line N] [--limit N]")
+		return exitcode.Usage
+	}
+	resp, err := client.StopSearchWithOptions(ctx, strings.Join(queryParts, " "), tfl.StopSearchOptions{Modes: csvArgs(modes), Lines: csvArgs(lines), MaxResults: maxResults, IncludeHubs: includeHubs})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
@@ -550,6 +612,8 @@ func tflArrivals(ctx context.Context, g globals, client *tfl.Client, args []stri
 	stop := fs.String("stop", "", "TfL stop ID")
 	line := fs.String("line", "", "line filter")
 	towards := fs.String("towards", "", "towards/destination substring")
+	direction := fs.String("direction", "", "line-arrivals direction: inbound, outbound, or all")
+	destinationStop := fs.String("destination-stop", "", "TfL destination stop ID for line-arrivals filtering")
 	limit := fs.Int("limit", 5, "maximum arrivals")
 	if err := fs.Parse(args); err != nil {
 		return exitcode.Usage
@@ -562,12 +626,12 @@ func tflArrivals(ctx context.Context, g globals, client *tfl.Client, args []stri
 		fmt.Fprintln(stderr, "--limit must be >= 0")
 		return exitcode.Usage
 	}
-	arrivals, err := client.Arrivals(ctx, *stop)
+	arrivals, err := client.LineArrivals(ctx, *stop, csvArgs(*line), *direction, *destinationStop)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
-	arrivals = tfl.FilterArrivals(arrivals, *line, *towards)
+	arrivals = tfl.FilterArrivals(arrivals, "", *towards)
 	if *limit < len(arrivals) {
 		arrivals = arrivals[:*limit]
 	}
@@ -589,6 +653,20 @@ func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []strin
 	date := fs.String("date", "", "YYYYMMDD")
 	when := fs.String("time", "", "HHmm")
 	arriving := fs.Bool("arriving", false, "treat time as arrival time")
+	via := fs.String("via", "", "optional via point")
+	preference := fs.String("preference", "LeastTime", "LeastTime, LeastInterchange, or LeastWalking")
+	modes := fs.String("mode", "", "comma-separated modes, e.g. tube,elizabeth-line,bus")
+	accessibility := fs.String("accessibility", "", "comma-separated accessibility preferences")
+	maxTransfer := fs.String("max-transfer-minutes", "", "maximum transfer walking minutes")
+	maxWalking := fs.String("max-walking-minutes", "", "maximum journey walking minutes")
+	walkingSpeed := fs.String("walking-speed", "", "Slow, Average, or Fast")
+	cyclePreference := fs.String("cycle-preference", "", "TfL cycle preference")
+	includeAlternatives := fs.Bool("include-alternatives", false, "include alternative public transport routes")
+	alternativeWalking := fs.Bool("alternative-walking", false, "include alternative walking journey")
+	alternativeCycle := fs.Bool("alternative-cycle", false, "include alternative cycling journey")
+	realTime := fs.Bool("real-time", false, "request real-time live arrivals where available")
+	betweenEntrances := fs.Bool("between-entrances", false, "include station entrance/platform routing")
+	localOnly := fs.Bool("local-only", false, "disable TfL nationalSearch")
 	if err := fs.Parse(args); err != nil {
 		return exitcode.Usage
 	}
@@ -596,7 +674,25 @@ func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []strin
 		fmt.Fprintln(stderr, "--from and --to are required")
 		return exitcode.Usage
 	}
-	resp, err := client.Journey(ctx, *from, *to, tfl.JourneyOptions{Date: *date, Time: *when, Arriving: *arriving})
+	resp, err := client.Journey(ctx, *from, *to, tfl.JourneyOptions{
+		Date:                     *date,
+		Time:                     *when,
+		Arriving:                 *arriving,
+		Via:                      *via,
+		Preference:               canonicalJourneyPreference(*preference),
+		Modes:                    csvArgs(*modes),
+		AccessibilityPreferences: csvArgs(*accessibility),
+		MaxTransferMinutes:       *maxTransfer,
+		MaxWalkingMinutes:        *maxWalking,
+		WalkingSpeed:             canonicalWalkingSpeed(*walkingSpeed),
+		CyclePreference:          canonicalCyclePreference(*cyclePreference),
+		IncludeAlternativeRoutes: *includeAlternatives,
+		AlternativeWalking:       *alternativeWalking,
+		AlternativeCycle:         *alternativeCycle,
+		UseRealTimeLiveArrivals:  *realTime,
+		RouteBetweenEntrances:    *betweenEntrances,
+		LocalOnly:                *localOnly,
+	})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
@@ -677,7 +773,7 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 		fmt.Fprintln(stderr, err)
 		return exitcode.Config
 	}
-	arrivals, err := client.Arrivals(ctx, *stop)
+	arrivals, err := client.LineArrivals(ctx, *stop, csvArgs(*line), "", "")
 	if err != nil {
 		msg := fmt.Sprintf("Live transport check failed: %v", err)
 		notificationOK, sendErr := sendWatchNotification(ctx, sender, msg)
@@ -689,7 +785,7 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 		writeWatchResult(g, stdout, watchResult{Status: "api_failed", Message: msg, Notification: msg, NotificationOK: notificationOK})
 		return exitcode.Network
 	}
-	arrivals = tfl.FilterArrivals(arrivals, *line, *towards)
+	arrivals = tfl.FilterArrivals(arrivals, "", *towards)
 	if len(arrivals) == 0 {
 		msg := fmt.Sprintf("Live transport update: TfL no longer shows a matching %s from stop %s.", *line, *stop)
 		notificationOK, err := sendWatchNotification(ctx, sender, msg)
@@ -796,6 +892,75 @@ func hhmm(iso string) string {
 	return iso
 }
 
+func csvArgs(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func appendCSV(existing, value string) string {
+	if strings.TrimSpace(existing) == "" {
+		return value
+	}
+	return existing + "," + value
+}
+
+func canonicalJourneyPreference(value string) string {
+	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "-", "")) {
+	case "", "leasttime", "time", "fastest":
+		return "LeastTime"
+	case "leastinterchange", "interchange":
+		return "LeastInterchange"
+	case "leastwalking", "walking":
+		return "LeastWalking"
+	default:
+		return value
+	}
+}
+
+func canonicalWalkingSpeed(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "average":
+		if strings.TrimSpace(value) == "" {
+			return ""
+		}
+		return "Average"
+	case "slow":
+		return "Slow"
+	case "fast":
+		return "Fast"
+	default:
+		return value
+	}
+}
+
+func canonicalCyclePreference(value string) string {
+	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "-", "")) {
+	case "":
+		return ""
+	case "none":
+		return "None"
+	case "leaveatstation":
+		return "LeaveAtStation"
+	case "takeontransport":
+		return "TakeOnTransport"
+	case "alltheway":
+		return "AllTheWay"
+	case "cyclehire":
+		return "CycleHire"
+	default:
+		return value
+	}
+}
+
 func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "londonjourneycli - executable contracts for agent skills")
 	fmt.Fprintln(w, "")
@@ -809,7 +974,8 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  doctor <skill>               Check local requirements")
 	fmt.Fprintln(w, "  run <skill> <command>        Run a manifest command")
 	fmt.Fprintln(w, "  test <skill>                 Run manifest tests")
-	fmt.Fprintln(w, "  tfl stop-search <query>      Search TfL bus stops")
+	fmt.Fprintln(w, "  tfl stop-search <query>      Search TfL stops and stations")
+	fmt.Fprintln(w, "  tfl stop-info --stop ID      Show a stop point and child stops")
 	fmt.Fprintln(w, "  tfl arrivals --stop ID       Show live arrivals")
 	fmt.Fprintln(w, "  tfl journey --from A --to B  Plan a London journey")
 	fmt.Fprintln(w, "  tfl watch-arrival ...        One-shot live arrival check")

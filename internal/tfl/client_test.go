@@ -18,6 +18,9 @@ func TestResolveKnownStop(t *testing.T) {
 }
 
 func TestFilterArrivals(t *testing.T) {
+	if got := FilterArrivals([]Arrival{}, "", ""); got == nil || len(got) != 0 {
+		t.Fatalf("expected non-nil empty arrivals, got %+v", got)
+	}
 	arrivals := []Arrival{
 		{LineName: "N3", DestinationName: "Bromley North", Towards: "Crystal Palace", TimeToStation: 120},
 		{LineName: "12", DestinationName: "Dulwich Library", Towards: "Dulwich", TimeToStation: 60},
@@ -56,21 +59,35 @@ func TestLiveTfLStopSearchArrivalsJourney(t *testing.T) {
 	if os.Getenv("LONDONJOURNEYCLI_LIVE_TFL") != "1" {
 		t.Skip("set LONDONJOURNEYCLI_LIVE_TFL=1 to run live TfL smoke test")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
 	c := NewClient(os.Getenv("TFL_APP_KEY"))
-	search, err := c.StopSearch(ctx, "London Bridge")
+	c.HTTPClient.Timeout = 30 * time.Second
+	search, err := c.StopSearchWithOptions(ctx, "London Bridge", StopSearchOptions{Modes: []string{"tube", "bus"}, MaxResults: 3})
 	if err != nil {
 		t.Fatalf("stop search: %v", err)
 	}
 	if search.Total == 0 || len(search.Matches) == 0 {
 		t.Fatalf("expected London Bridge stop matches, got %+v", search)
 	}
-	if _, err := c.Arrivals(ctx, search.Matches[0].ID); err != nil {
-		t.Fatalf("arrivals endpoint should respond even when no vehicles are due: %v", err)
+	stop, err := c.StopPoint(ctx, "490G00008459")
+	if err != nil {
+		t.Fatalf("stop point: %v", err)
 	}
-	journey, err := c.Journey(ctx, "London Bridge", "Paddington", JourneyOptions{})
+	if len(stop.Children) == 0 {
+		t.Fatalf("expected child stops for parent stop, got %+v", stop)
+	}
+	if arrivals, err := c.LineArrivals(ctx, "490G00008459", []string{"N3"}, "", ""); err != nil {
+		t.Fatalf("line arrivals endpoint should respond even when no vehicles are due: %v", err)
+	} else if arrivals == nil {
+		t.Fatal("expected non-nil arrivals slice")
+	}
+	journey, err := c.Journey(ctx, "London Bridge", "Paddington", JourneyOptions{
+		Preference:              "LeastWalking",
+		MaxWalkingMinutes:       "20",
+		UseRealTimeLiveArrivals: true,
+	})
 	if err != nil {
 		t.Fatalf("journey: %v", err)
 	}

@@ -10,7 +10,9 @@ Use LondonJourneyCLI for deterministic London journey planning and live transpor
 Examples:
 
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
+    londonjourneycli tfl journey --from "London Bridge" --to "Paddington" --preference LeastWalking --max-walking-minutes 15
     londonjourneycli --json tfl arrivals --stop 490000235N --line 43
-    londonjourneycli --json tfl stop-search "London Bridge"
+    londonjourneycli --json tfl stop-search "London Bridge" --mode tube,bus
+    londonjourneycli --json tfl stop-info --stop 490G00008459
 
 For time-critical heads-ups, use londonjourneycli tfl watch-arrival from OpenClaw cron with explicit visible delivery.
