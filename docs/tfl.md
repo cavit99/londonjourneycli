@@ -35,8 +35,11 @@ Use stop-info when stop-search returns a parent stop group and you need the conc
 
     londonjourneycli tfl arrivals --stop 490000235N --line 43
     londonjourneycli tfl arrivals --stop 490000235N --line 43 --direction inbound
+    londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
 
 When --line is provided, arrivals uses TfL's line-specific arrivals endpoint rather than fetching every prediction for the stop and filtering locally.
+
+Use next-arrival for assistant-style requests such as "next N3 from Ildersly Grove". It resolves the stop query with the line filter, checks candidate stops for actual predictions, and returns the selected stop plus the next arrivals in one JSON payload. Query mode defaults to bus stops; pass --mode all or a rail/tube mode for non-bus lines. It checks up to five candidates by default; lower --search-limit for tighter cron checks when the stop name is unambiguous.
 
 ## One-shot Watch
 
@@ -44,7 +47,7 @@ When --line is provided, arrivals uses TfL's line-specific arrivals endpoint rat
 
 Add OpenClaw delivery flags to send visible messages from cron:
 
-    londonjourneycli --json --no-input tfl watch-arrival --stop 490000235N --line 43 --threshold 2m --openclaw-channel whatsapp --openclaw-target +15555550123
+    londonjourneycli --json --no-input tfl watch-arrival --query "Ildersly Grove" --line N3 --threshold 2m --openclaw-channel whatsapp --openclaw-target +15555550123
 
 The watch command sends on due, delayed, no-data, and TfL API failure states when delivery is configured. If delivery itself fails, JSON output includes notificationOk=false and the command exits non-zero.
 
@@ -54,6 +57,7 @@ Branch on JSON status:
 
 - due: message sent, no further check needed.
 - delayed: message sent; schedule another visible check at nextCheckAt.
+- stop_not_found: message sent; the stop query did not resolve.
 - no_data: message sent; the expected service is no longer visible.
 - api_failed: message sent if possible; check manually if the alert matters.
 

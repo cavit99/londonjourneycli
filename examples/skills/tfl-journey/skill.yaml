@@ -18,6 +18,9 @@ commands:
   - name: arrivals
     description: Check live arrivals at a stop.
     exec: [londonjourneycli, tfl, arrivals]
+  - name: next-arrival
+    description: Resolve a stop query and return the next matching live arrival.
+    exec: [londonjourneycli, tfl, next-arrival]
   - name: stop-info
     description: Inspect a stop point and its child stops.
     exec: [londonjourneycli, tfl, stop-info]

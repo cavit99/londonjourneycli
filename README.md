@@ -61,6 +61,7 @@ TfL examples:
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
     londonjourneycli tfl journey --from "Westminster" --to "Waterloo" --preference LeastWalking --max-walking-minutes 15
     londonjourneycli --json tfl arrivals --stop 490000235N --line 43
+    londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
 
 ## Skill Manifests
 
@@ -111,9 +112,11 @@ If a missed message can cause real-world inconvenience, silence is a bug.
 
 londonjourneycli tfl watch-arrival performs a deterministic one-shot live check and can deliver through OpenClaw:
 
-    londonjourneycli --json --no-input tfl watch-arrival --stop 490000235N --line 43 --threshold 2m --openclaw-channel whatsapp --openclaw-target +15555550123
+    londonjourneycli --json --no-input tfl watch-arrival --query "Ildersly Grove" --line N3 --threshold 2m --openclaw-channel whatsapp --openclaw-target +15555550123
 
 When delivery is configured, it sends on due, delayed, no-data, and API-failure states. If the send itself fails, LondonJourneyCLI returns non-zero and reports notificationOk=false in JSON output. In --no-input mode, watch-arrival requires either complete OpenClaw delivery flags or --dry-run; silent unattended watches are rejected.
+
+For assistant use, prefer --query when the user gave a stop name and --stop when you already have a known TfL stop ID. Query mode narrows stop search by line and checks candidate stops until it finds live predictions, which avoids most parent-stop/child-stop churn.
 
 If the JSON status is delayed and nextCheckAt is present, the caller must schedule another visible check. LondonJourneyCLI performs the one-shot check; it does not silently reschedule itself.
 

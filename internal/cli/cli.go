@@ -475,7 +475,7 @@ func runArgvWithIO(ctx context.Context, argv []string, opts runOptions, stdout, 
 
 func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <stop-search|stop-info|arrivals|journey|watch-arrival>")
+		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <stop-search|stop-info|arrivals|next-arrival|journey|watch-arrival>")
 		return exitcode.Usage
 	}
 	client := tfl.NewClient(os.Getenv("TFL_APP_KEY"))
@@ -489,6 +489,8 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 		return tflStopInfo(ctx, g, client, args[1:], stdout, stderr)
 	case "arrivals":
 		return tflArrivals(ctx, g, client, args[1:], stdout, stderr)
+	case "next-arrival":
+		return tflNextArrival(ctx, g, client, args[1:], stdout, stderr)
 	case "journey":
 		return tflJourney(ctx, g, client, args[1:], stdout, stderr)
 	case "watch-arrival":
@@ -645,6 +647,110 @@ func tflArrivals(ctx context.Context, g globals, client *tfl.Client, args []stri
 	return exitcode.OK
 }
 
+type resolvedStop struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Lat      float64  `json:"lat,omitempty"`
+	Lon      float64  `json:"lon,omitempty"`
+	Modes    []string `json:"modes,omitempty"`
+	ParentID string   `json:"topMostParentId,omitempty"`
+}
+
+type nextArrivalResult struct {
+	Status       string        `json:"status"`
+	Message      string        `json:"message"`
+	Line         string        `json:"line,omitempty"`
+	Query        string        `json:"query,omitempty"`
+	Candidates   int           `json:"candidates,omitempty"`
+	ResolvedStop *resolvedStop `json:"resolvedStop,omitempty"`
+	Next         *tfl.Arrival  `json:"next,omitempty"`
+	Arrivals     []tfl.Arrival `json:"arrivals"`
+}
+
+func tflNextArrival(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("next-arrival", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	stop := fs.String("stop", "", "TfL stop ID")
+	query := fs.String("query", "", "stop/station search query")
+	line := fs.String("line", "", "line filter")
+	towards := fs.String("towards", "", "towards/destination substring")
+	direction := fs.String("direction", "", "line-arrivals direction: inbound, outbound, or all")
+	destinationStop := fs.String("destination-stop", "", "TfL destination stop ID for line-arrivals filtering")
+	mode := fs.String("mode", "bus", "stop-search modes for --query, or all")
+	searchLimit := fs.Int("search-limit", 5, "maximum stop-search candidates for --query")
+	limit := fs.Int("limit", 3, "maximum arrivals")
+	if err := fs.Parse(args); err != nil {
+		return exitcode.Usage
+	}
+	if *line == "" {
+		fmt.Fprintln(stderr, "--line is required")
+		return exitcode.Usage
+	}
+	if (*stop == "") == (*query == "") {
+		fmt.Fprintln(stderr, "provide exactly one of --stop or --query")
+		return exitcode.Usage
+	}
+	if *limit <= 0 {
+		fmt.Fprintln(stderr, "--limit must be > 0")
+		return exitcode.Usage
+	}
+	if *query != "" && *searchLimit <= 0 {
+		fmt.Fprintln(stderr, "--search-limit must be > 0")
+		return exitcode.Usage
+	}
+
+	found, err := findArrivals(ctx, client, arrivalLookup{
+		StopID:          *stop,
+		Query:           *query,
+		Lines:           csvArgs(*line),
+		Towards:         *towards,
+		Direction:       *direction,
+		DestinationStop: *destinationStop,
+		SearchModes:     queryModes(*mode),
+		SearchLimit:     *searchLimit,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitcode.Network
+	}
+	arrivals := found.Arrivals
+	if *limit < len(found.Arrivals) {
+		arrivals = found.Arrivals[:*limit]
+	}
+	if arrivals == nil {
+		arrivals = []tfl.Arrival{}
+	}
+	result := nextArrivalResult{Status: "no_data", Line: *line, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrivals: arrivals}
+	if !found.StopFound {
+		result.Status = "stop_not_found"
+		result.Message = fmt.Sprintf("TfL found no stop matching %q.", *query)
+		writeNextArrivalResult(g, stdout, result)
+		return exitcode.NoData
+	}
+	stopLabel := "selected stop"
+	if found.Stop != nil {
+		stopLabel = found.Stop.Name
+		if stopLabel == "" {
+			stopLabel = found.Stop.ID
+		}
+	}
+	if len(arrivals) == 0 {
+		if found.Query != "" {
+			result.Message = fmt.Sprintf("TfL found %d candidate stops for %q, but no matching %s arrivals.", found.Candidates, found.Query, *line)
+		} else {
+			result.Message = fmt.Sprintf("TfL shows no matching %s arrivals from %s.", *line, stopLabel)
+		}
+		writeNextArrivalResult(g, stdout, result)
+		return exitcode.NoData
+	}
+	next := arrivals[0]
+	result.Status = "ok"
+	result.Next = &next
+	result.Message = fmt.Sprintf("Next %s from %s is about %d min away towards %s.", next.LineName, stopLabel, roundMinutes(next.TimeToStation), next.DestinationName)
+	writeNextArrivalResult(g, stdout, result)
+	return exitcode.OK
+}
+
 func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("journey", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -737,21 +843,29 @@ func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []strin
 }
 
 type watchResult struct {
-	Status            string       `json:"status"`
-	Message           string       `json:"message"`
-	Arrival           *tfl.Arrival `json:"arrival,omitempty"`
-	NextCheckAt       string       `json:"nextCheckAt,omitempty"`
-	Notification      string       `json:"notification,omitempty"`
-	NotificationOK    bool         `json:"notificationOk"`
-	NotificationError string       `json:"notificationError,omitempty"`
+	Status            string        `json:"status"`
+	Message           string        `json:"message"`
+	Query             string        `json:"query,omitempty"`
+	Candidates        int           `json:"candidates,omitempty"`
+	ResolvedStop      *resolvedStop `json:"resolvedStop,omitempty"`
+	Arrival           *tfl.Arrival  `json:"arrival,omitempty"`
+	NextCheckAt       string        `json:"nextCheckAt,omitempty"`
+	Notification      string        `json:"notification,omitempty"`
+	NotificationOK    bool          `json:"notificationOk"`
+	NotificationError string        `json:"notificationError,omitempty"`
 }
 
 func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("watch-arrival", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	stop := fs.String("stop", "", "TfL stop ID")
+	query := fs.String("query", "", "stop/station search query")
 	line := fs.String("line", "", "line filter")
 	towards := fs.String("towards", "", "towards/destination substring")
+	direction := fs.String("direction", "", "line-arrivals direction: inbound, outbound, or all")
+	destinationStop := fs.String("destination-stop", "", "TfL destination stop ID for line-arrivals filtering")
+	mode := fs.String("mode", "bus", "stop-search modes for --query, or all")
+	searchLimit := fs.Int("search-limit", 5, "maximum stop-search candidates for --query")
 	threshold := fs.Duration("threshold", 2*time.Minute, "notify threshold")
 	channel := fs.String("openclaw-channel", "", "OpenClaw channel for notification")
 	target := fs.String("openclaw-target", "", "OpenClaw target for notification")
@@ -759,8 +873,16 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 	if err := fs.Parse(args); err != nil {
 		return exitcode.Usage
 	}
-	if *stop == "" || *line == "" {
-		fmt.Fprintln(stderr, "--stop and --line are required")
+	if *line == "" {
+		fmt.Fprintln(stderr, "--line is required")
+		return exitcode.Usage
+	}
+	if (*stop == "") == (*query == "") {
+		fmt.Fprintln(stderr, "provide exactly one of --stop or --query")
+		return exitcode.Usage
+	}
+	if *query != "" && *searchLimit <= 0 {
+		fmt.Fprintln(stderr, "--search-limit must be > 0")
 		return exitcode.Usage
 	}
 	if *threshold <= 0 {
@@ -773,28 +895,52 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 		fmt.Fprintln(stderr, err)
 		return exitcode.Config
 	}
-	arrivals, err := client.LineArrivals(ctx, *stop, csvArgs(*line), "", "")
+	found, err := findArrivals(ctx, client, arrivalLookup{
+		StopID:          *stop,
+		Query:           *query,
+		Lines:           csvArgs(*line),
+		Towards:         *towards,
+		Direction:       *direction,
+		DestinationStop: *destinationStop,
+		SearchModes:     queryModes(*mode),
+		SearchLimit:     *searchLimit,
+	})
 	if err != nil {
 		msg := fmt.Sprintf("Live transport check failed: %v", err)
 		notificationOK, sendErr := sendWatchNotification(ctx, sender, msg)
 		if sendErr != nil {
-			writeWatchResult(g, stdout, watchResult{Status: "api_failed", Message: msg, Notification: msg, NotificationOK: false, NotificationError: sendErr.Error()})
+			writeWatchResult(g, stdout, watchResult{Status: "api_failed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: false, NotificationError: sendErr.Error()})
 			fmt.Fprintln(stderr, sendErr)
 			return exitcode.Generic
 		}
-		writeWatchResult(g, stdout, watchResult{Status: "api_failed", Message: msg, Notification: msg, NotificationOK: notificationOK})
+		writeWatchResult(g, stdout, watchResult{Status: "api_failed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: notificationOK})
 		return exitcode.Network
 	}
-	arrivals = tfl.FilterArrivals(arrivals, "", *towards)
-	if len(arrivals) == 0 {
-		msg := fmt.Sprintf("Live transport update: TfL no longer shows a matching %s from stop %s.", *line, *stop)
+	if !found.StopFound {
+		msg := fmt.Sprintf("Live transport update: TfL found no stop matching %q.", *query)
 		notificationOK, err := sendWatchNotification(ctx, sender, msg)
 		if err != nil {
-			writeWatchResult(g, stdout, watchResult{Status: "no_data", Message: msg, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
+			writeWatchResult(g, stdout, watchResult{Status: "stop_not_found", Message: msg, Query: found.Query, Candidates: found.Candidates, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
 			fmt.Fprintln(stderr, err)
 			return exitcode.Generic
 		}
-		writeWatchResult(g, stdout, watchResult{Status: "no_data", Message: msg, Notification: msg, NotificationOK: notificationOK})
+		writeWatchResult(g, stdout, watchResult{Status: "stop_not_found", Message: msg, Query: found.Query, Candidates: found.Candidates, Notification: msg, NotificationOK: notificationOK})
+		return exitcode.NoData
+	}
+	arrivals := found.Arrivals
+	if len(arrivals) == 0 {
+		stopLabel := resolvedStopLabel(found.Stop, *stop)
+		msg := fmt.Sprintf("Live transport update: TfL no longer shows a matching %s from %s.", *line, stopLabel)
+		if found.Query != "" {
+			msg = fmt.Sprintf("Live transport update: TfL found %d candidate stops for %q, but no matching %s arrivals.", found.Candidates, found.Query, *line)
+		}
+		notificationOK, err := sendWatchNotification(ctx, sender, msg)
+		if err != nil {
+			writeWatchResult(g, stdout, watchResult{Status: "no_data", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
+			fmt.Fprintln(stderr, err)
+			return exitcode.Generic
+		}
+		writeWatchResult(g, stdout, watchResult{Status: "no_data", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: notificationOK})
 		return exitcode.NoData
 	}
 
@@ -804,11 +950,11 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 		msg := fmt.Sprintf("Transport heads-up: live TfL says the %s is about %d min away from %s.", next.LineName, roundMinutes(next.TimeToStation), next.StationName)
 		notificationOK, err := sendWatchNotification(ctx, sender, msg)
 		if err != nil {
-			writeWatchResult(g, stdout, watchResult{Status: "due", Message: msg, Arrival: &next, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
+			writeWatchResult(g, stdout, watchResult{Status: "due", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
 			fmt.Fprintln(stderr, err)
 			return exitcode.Generic
 		}
-		writeWatchResult(g, stdout, watchResult{Status: "due", Message: msg, Arrival: &next, Notification: msg, NotificationOK: notificationOK})
+		writeWatchResult(g, stdout, watchResult{Status: "due", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, Notification: msg, NotificationOK: notificationOK})
 		return exitcode.OK
 	}
 
@@ -816,12 +962,150 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 	msg := fmt.Sprintf("Transport update: live TfL says the %s has slipped to %s, about %d min away. Check again around %s.", next.LineName, next.ExpectedArrival.Local().Format("15:04"), roundMinutes(next.TimeToStation), nextCheck.Local().Format("15:04"))
 	notificationOK, err := sendWatchNotification(ctx, sender, msg)
 	if err != nil {
-		writeWatchResult(g, stdout, watchResult{Status: "delayed", Message: msg, Arrival: &next, NextCheckAt: nextCheck.Format(time.RFC3339), Notification: msg, NotificationOK: false, NotificationError: err.Error()})
+		writeWatchResult(g, stdout, watchResult{Status: "delayed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, NextCheckAt: nextCheck.Format(time.RFC3339), Notification: msg, NotificationOK: false, NotificationError: err.Error()})
 		fmt.Fprintln(stderr, err)
 		return exitcode.Generic
 	}
-	writeWatchResult(g, stdout, watchResult{Status: "delayed", Message: msg, Arrival: &next, NextCheckAt: nextCheck.Format(time.RFC3339), Notification: msg, NotificationOK: notificationOK})
+	writeWatchResult(g, stdout, watchResult{Status: "delayed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, NextCheckAt: nextCheck.Format(time.RFC3339), Notification: msg, NotificationOK: notificationOK})
 	return exitcode.OK
+}
+
+type arrivalLookup struct {
+	StopID          string
+	Query           string
+	Lines           []string
+	Towards         string
+	Direction       string
+	DestinationStop string
+	SearchModes     []string
+	SearchLimit     int
+}
+
+type foundArrivals struct {
+	Stop       *resolvedStop
+	Arrivals   []tfl.Arrival
+	Query      string
+	Candidates int
+	StopFound  bool
+}
+
+func findArrivals(ctx context.Context, client *tfl.Client, lookup arrivalLookup) (foundArrivals, error) {
+	if lookup.StopID != "" {
+		arrivals, err := client.LineArrivals(ctx, lookup.StopID, lookup.Lines, lookup.Direction, lookup.DestinationStop)
+		if err != nil {
+			return foundArrivals{Stop: stopFromID(lookup.StopID), StopFound: true}, err
+		}
+		return foundArrivals{Stop: stopFromID(lookup.StopID), Arrivals: tfl.FilterArrivals(arrivals, "", lookup.Towards), StopFound: true}, nil
+	}
+	search, err := client.StopSearchWithOptions(ctx, lookup.Query, tfl.StopSearchOptions{
+		Modes:      lookup.SearchModes,
+		Lines:      lookup.Lines,
+		MaxResults: lookup.SearchLimit,
+	})
+	if err != nil {
+		return foundArrivals{Query: lookup.Query}, err
+	}
+	found := foundArrivals{Query: lookup.Query, Candidates: len(search.Matches), StopFound: len(search.Matches) > 0}
+	if len(search.Matches) == 0 {
+		found.Arrivals = []tfl.Arrival{}
+		return found, nil
+	}
+	found.Stop = stopFromMatch(search.Matches[0])
+	var firstArrivals []tfl.Arrival
+	var firstErr error
+	for _, match := range search.Matches {
+		candidate := stopFromMatch(match)
+		arrivals, err := client.LineArrivals(ctx, match.ID, lookup.Lines, lookup.Direction, lookup.DestinationStop)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("check arrivals for %s: %w", resolvedStopLabel(candidate, match.ID), err)
+			}
+			continue
+		}
+		arrivals = tfl.FilterArrivals(arrivals, "", lookup.Towards)
+		if firstArrivals == nil {
+			firstArrivals = arrivals
+		}
+		if len(arrivals) > 0 {
+			found.Stop = candidate
+			found.Arrivals = arrivals
+			return found, nil
+		}
+	}
+	found.Arrivals = firstArrivals
+	if firstErr != nil {
+		return found, firstErr
+	}
+	return found, nil
+}
+
+func stopFromID(id string) *resolvedStop {
+	return &resolvedStop{ID: id}
+}
+
+func stopFromMatch(match tfl.MatchedStop) *resolvedStop {
+	return &resolvedStop{ID: match.ID, Name: match.Name, Lat: match.Lat, Lon: match.Lon, Modes: match.Modes, ParentID: match.ParentID}
+}
+
+func queryModes(value string) []string {
+	if strings.EqualFold(strings.TrimSpace(value), "all") {
+		return nil
+	}
+	return csvArgs(value)
+}
+
+func resolvedStopLabel(stop *resolvedStop, fallback string) string {
+	if stop == nil {
+		return fallback
+	}
+	if strings.TrimSpace(stop.Name) != "" {
+		return stop.Name
+	}
+	if strings.TrimSpace(stop.ID) != "" {
+		return stop.ID
+	}
+	return fallback
+}
+
+func writeNextArrivalResult(g globals, stdout io.Writer, result nextArrivalResult) {
+	if g.format == output.JSON {
+		_ = output.WriteJSON(stdout, result)
+		return
+	}
+	if g.format == output.Plain {
+		stopID := ""
+		stopName := ""
+		if result.ResolvedStop != nil {
+			stopID = result.ResolvedStop.ID
+			stopName = result.ResolvedStop.Name
+		}
+		nextLine := ""
+		nextDestination := ""
+		nextStation := ""
+		nextTime := ""
+		nextSeconds := ""
+		if result.Next != nil {
+			nextLine = result.Next.LineName
+			nextDestination = result.Next.DestinationName
+			nextStation = result.Next.StationName
+			nextTime = result.Next.ExpectedArrival.Format(time.RFC3339)
+			nextSeconds = strconv.Itoa(result.Next.TimeToStation)
+		}
+		_ = output.WritePlainRows(stdout, [][]string{{
+			result.Status,
+			result.Message,
+			result.Line,
+			stopID,
+			stopName,
+			nextLine,
+			nextDestination,
+			nextStation,
+			nextTime,
+			nextSeconds,
+		}})
+		return
+	}
+	fmt.Fprintln(stdout, result.Message)
 }
 
 func sendWatchNotification(ctx context.Context, sender notify.OpenClaw, message string) (bool, error) {
@@ -977,6 +1261,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  tfl stop-search <query>      Search TfL stops and stations")
 	fmt.Fprintln(w, "  tfl stop-info --stop ID      Show a stop point and child stops")
 	fmt.Fprintln(w, "  tfl arrivals --stop ID       Show live arrivals")
+	fmt.Fprintln(w, "  tfl next-arrival ...         Resolve a stop query and show the next arrival")
 	fmt.Fprintln(w, "  tfl journey --from A --to B  Plan a London journey")
 	fmt.Fprintln(w, "  tfl watch-arrival ...        One-shot live arrival check")
 }

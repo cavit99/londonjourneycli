@@ -47,8 +47,10 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		{name: "search", args: []string{"--json", "tfl", "stop-search", "London Bridge", "--limit", "1"}, want: "London Bridge Station", code: exitcode.OK},
 		{name: "stop-info", args: []string{"--json", "tfl", "stop-info", "--stop", "490G00008459"}, want: "490008459S", code: exitcode.OK},
 		{name: "arrivals", args: []string{"tfl", "arrivals", "--stop", "490000139R", "--line", "43"}, want: "Friern Barnet", code: exitcode.OK},
+		{name: "next arrival query", args: []string{"--json", "tfl", "next-arrival", "--query", "London Bridge", "--line", "43"}, want: "\"resolvedStop\": {", code: exitcode.OK},
 		{name: "journey", args: []string{"tfl", "journey", "--from", "London Bridge", "--to", "Paddington"}, want: "Option 1", code: exitcode.OK},
 		{name: "watch", args: []string{"--json", "tfl", "watch-arrival", "--stop", "490000139R", "--line", "43", "--threshold", "2m", "--dry-run"}, want: "\"status\": \"due\"", code: exitcode.OK},
+		{name: "watch query", args: []string{"--json", "tfl", "watch-arrival", "--query", "London Bridge", "--line", "43", "--threshold", "2m", "--dry-run"}, want: "London Bridge Station", code: exitcode.OK},
 		{name: "watch plain", args: []string{"--plain", "tfl", "watch-arrival", "--stop", "490000139R", "--line", "43", "--threshold", "2m", "--dry-run"}, want: "due\tTransport heads-up:", code: exitcode.OK},
 		{name: "watch documented no-input", args: []string{"--json", "--no-input", "tfl", "watch-arrival", "--stop", "490000139R", "--line", "43", "--threshold", "2m", "--dry-run"}, want: "\"status\": \"due\"", code: exitcode.OK},
 		{name: "negative search limit", args: []string{"tfl", "stop-search", "London Bridge", "--limit", "-1"}, want: "--limit must be >= 0", code: exitcode.Usage},
@@ -73,6 +75,136 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 	}
 
 	_ = os.Getenv("TFL_BASE_URL")
+}
+
+func TestTFLNextArrivalQuerySkipsSearchMatchesWithNoPredictions(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("lines"); got != "43" {
+			t.Fatalf("lines query=%q", got)
+		}
+		if got := r.URL.Query().Get("modes"); got != "bus" {
+			t.Fatalf("modes query=%q", got)
+		}
+		body := `{"Query":"London Bridge","Total":2,"Matches":[{"ID":"first","Name":"Wrong Side","Lat":51.5,"Lon":-0.08,"Modes":["bus"]},{"ID":"second","Name":"Right Side","Lat":51.5,"Lon":-0.08,"Modes":["bus"]}]}`
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/Line/43/Arrivals/first", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[]"))
+	})
+	mux.HandleFunc("/Line/43/Arrivals/second", func(w http.ResponseWriter, r *http.Request) {
+		body := `[{"LineName":"43","DestinationName":"Friern Barnet","StationName":"Right Side","PlatformName":"D","Towards":"Old Street","ExpectedArrival":"2026-05-18T01:03:00Z","TimeToStation":180,"VehicleID":"b"}]`
+		_, _ = w.Write([]byte(body))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "next-arrival", "--query", "London Bridge", "--line", "43"}, &out, &errb)
+	if code != exitcode.OK {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	for _, want := range []string{`"status": "ok"`, `"name": "Right Side"`, `"destinationName": "Friern Barnet"`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("expected %q in %s", want, out.String())
+		}
+	}
+}
+
+func TestTFLNextArrivalQueryContinuesAfterCandidateError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
+		body := `{"Query":"London Bridge","Total":2,"Matches":[{"ID":"broken","Name":"Broken Candidate","Modes":["bus"]},{"ID":"second","Name":"Right Side","Modes":["bus"]}]}`
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/Line/43/Arrivals/broken", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream failed", http.StatusBadGateway)
+	})
+	mux.HandleFunc("/Line/43/Arrivals/second", func(w http.ResponseWriter, r *http.Request) {
+		body := `[{"LineName":"43","DestinationName":"Friern Barnet","StationName":"Right Side","PlatformName":"D","Towards":"Old Street","ExpectedArrival":"2026-05-18T01:03:00Z","TimeToStation":180,"VehicleID":"b"}]`
+		_, _ = w.Write([]byte(body))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "next-arrival", "--query", "London Bridge", "--line", "43"}, &out, &errb)
+	if code != exitcode.OK {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), `"name": "Right Side"`) {
+		t.Fatalf("expected second candidate to win, got %s", out.String())
+	}
+}
+
+func TestTFLNextArrivalQueryReportsAPIErrorWhenCandidateErrorLeavesResultAmbiguous(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
+		body := `{"Query":"London Bridge","Total":2,"Matches":[{"ID":"broken","Name":"Broken Candidate","Modes":["bus"]},{"ID":"empty","Name":"Empty Candidate","Modes":["bus"]}]}`
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/Line/43/Arrivals/broken", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream failed", http.StatusBadGateway)
+	})
+	mux.HandleFunc("/Line/43/Arrivals/empty", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[]"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "next-arrival", "--query", "London Bridge", "--line", "43"}, &out, &errb)
+	if code != exitcode.Network {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "check arrivals for Broken Candidate") {
+		t.Fatalf("expected ambiguous candidate error, got %s", errb.String())
+	}
+}
+
+func TestTFLNextArrivalQueryStopNotFound(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"Query":"Nowhere","Total":0,"Matches":[]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "next-arrival", "--query", "Nowhere", "--line", "43"}, &out, &errb)
+	if code != exitcode.NoData {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	for _, want := range []string{`"status": "stop_not_found"`, `"query": "Nowhere"`, "TfL found no stop matching"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("expected %q in %s", want, out.String())
+		}
+	}
+}
+
+func TestTFLWatchArrivalQueryStopNotFoundIsVisible(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"Query":"Nowhere","Total":0,"Matches":[]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "watch-arrival", "--query", "Nowhere", "--line", "43", "--dry-run"}, &out, &errb)
+	if code != exitcode.NoData {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	for _, want := range []string{`"status": "stop_not_found"`, `"notificationOk": true`, "TfL found no stop matching"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("expected %q in %s", want, out.String())
+		}
+	}
 }
 
 func TestTFLWatchArrivalSuccessfulOpenClawDelivery(t *testing.T) {
