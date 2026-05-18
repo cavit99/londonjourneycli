@@ -939,9 +939,6 @@ func tflAccessibleStations(ctx context.Context, g globals, client *tfl.Client, a
 		}
 		*lat = parsedLat
 		*lon = parsedLon
-	} else if !latSeen || !lonSeen {
-		fmt.Fprintln(stderr, "provide exactly one of --near, --location, or both --lat and --lon")
-		return exitcode.Usage
 	}
 	if err := validateLatLon(*lat, *lon); err != nil {
 		fmt.Fprintln(stderr, err)
