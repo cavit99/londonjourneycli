@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -226,6 +227,32 @@ func TestTFLNextArrivalQueryStopNotFound(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("expected %q in %s", want, out.String())
 		}
+	}
+}
+
+func TestTFLEnvelopeWrapsRequestFailure(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TFL_BASE_URL", "http://"+addr)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "--envelope", "--timeout", "1s", "tfl", "status"}, &out, &errb)
+	if code != exitcode.Network {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	for _, want := range []string{"\"ok\": false", "\"status\": \"api_failed\"", "\"data\": {"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("expected %q in %s", want, out.String())
+		}
+	}
+	if strings.TrimSpace(errb.String()) != "" {
+		t.Fatalf("expected empty stderr for JSON request failure, got %s", errb.String())
 	}
 }
 

@@ -19,7 +19,7 @@ LondonJourneyCLI is designed to be driven by agents, cron jobs, and scripts.
 
 Agents should resolve "home", "office", venue names, and vague areas before calling "tfl journey". Use private user context for personal aliases and an address/postcode/source lookup for venues. If TfL still returns "status: ambiguous" in JSON mode, inspect "error.disambiguation" and retry with the obvious London candidate's parameterValue or exact address. Ask one clarification only when the candidates are genuinely unclear.
 
-JSON mode structures TfL API errors that return HTTP responses, including status "ambiguous" and status "api_error". Lower-level request failures such as DNS or local timeouts can still be stderr-only diagnostics with a non-zero exit code.
+JSON mode structures TfL API errors and request failures. Journey planning can return status "ambiguous" with TfL disambiguation data; non-watch TfL request failures return status "api_error" for HTTP failures or "api_failed" for lower-level network/timeout failures. With --envelope, ok is false for all of these.
 
 Use tfl status and tfl disruptions before giving time-sensitive route advice when delays would change the recommendation.
 Use tfl line-routes when choosing or explaining line direction, termini, or service sections.
