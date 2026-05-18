@@ -583,7 +583,7 @@ func runArgvWithIO(ctx context.Context, argv []string, opts runOptions, stdout, 
 
 func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|line-routes|nearby-stops|stop-search|stop-info|arrivals|next-arrival|journey|watch-arrival>")
+		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|line-routes|nearby-stops|stop-search|stop-info|arrivals|next-arrival|journey|fares|watch-arrival>")
 		return exitcode.Usage
 	}
 	client := tfl.NewClient(os.Getenv("TFL_APP_KEY"))
@@ -609,6 +609,8 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 		return tflNextArrival(ctx, g, client, args[1:], stdout, stderr)
 	case "journey":
 		return tflJourney(ctx, g, client, args[1:], stdout, stderr)
+	case "fare", "fares":
+		return tflFares(ctx, g, client, args[1:], stdout, stderr)
 	case "watch-arrival":
 		return tflWatchArrival(ctx, g, client, args[1:], stdout, stderr)
 	default:
@@ -1472,6 +1474,330 @@ func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []strin
 	return exitcode.OK
 }
 
+func tflFares(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("fares", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	from := fs.String("from", "", "origin station")
+	to := fs.String("to", "", "destination station")
+	fromID := fs.String("from-id", "", "origin TfL stop ID")
+	toID := fs.String("to-id", "", "destination TfL stop ID")
+	fromZone := fs.Int("from-zone", 0, "origin fare zone")
+	toZone := fs.Int("to-zone", 0, "destination fare zone")
+	passenger := fs.String("passenger", "Adult", "TfL passenger type")
+	payment := fs.String("payment", "contactless", "contactless, oyster, or cash")
+	date := fs.String("date", "", "YYYYMMDD")
+	when := fs.String("time", "", "HHmm")
+	period := fs.String("period", "peak", "peak, off-peak, or anytime for zonal lookup")
+	mode := fs.String("mode", "tube,dlr,overground,elizabeth-line,national-rail", "station search modes for --from/--to")
+	if err := fs.Parse(args); err != nil {
+		return exitcode.Usage
+	}
+	if *fromZone != 0 || *toZone != 0 {
+		if *from != "" || *to != "" || *fromID != "" || *toID != "" {
+			fmt.Fprintln(stderr, "--from-zone/--to-zone cannot be combined with station flags")
+			return exitcode.Usage
+		}
+		if *fromZone == 0 || *toZone == 0 {
+			fmt.Fprintln(stderr, "--from-zone and --to-zone are required together")
+			return exitcode.Usage
+		}
+		quote, code := zoneFareQuote(*fromZone, *toZone, *passenger, *payment, *period)
+		return writeFareQuote(g, stdout, stderr, quote, code)
+	}
+	if *from == "" || *to == "" {
+		fmt.Fprintln(stderr, "provide either --from/--to or --from-zone/--to-zone")
+		return exitcode.Usage
+	}
+	if *passenger != "" && !strings.EqualFold(*passenger, "Adult") {
+		quote := tfl.FareQuote{Status: "unsupported", Message: "Station fare lookup currently supports Adult PAYG/contactless fares only.", Kind: "journey", From: *from, To: *to, PassengerType: *passenger, Currency: "GBP", Fares: []tfl.FareOption{}, Source: "TfL Journey Planner fare"}
+		return writeFareQuote(g, stdout, stderr, quote, exitcode.NoData)
+	}
+	resolvedFrom := tfl.MatchedStop{Name: *from, ID: *fromID}
+	resolvedTo := tfl.MatchedStop{Name: *to, ID: *toID}
+	var err error
+	if resolvedFrom.ID == "" {
+		resolvedFrom, err = resolveFareStation(ctx, client, *from, csvArgs(*mode))
+		if err != nil {
+			return writeFareResolutionError(g, stdout, stderr, "from", *from, err)
+		}
+	}
+	if resolvedTo.ID == "" {
+		resolvedTo, err = resolveFareStation(ctx, client, *to, csvArgs(*mode))
+		if err != nil {
+			return writeFareResolutionError(g, stdout, stderr, "to", *to, err)
+		}
+	}
+	resp, err := client.Journey(ctx, firstNonEmptyString(resolvedFrom.ID, *from), firstNonEmptyString(resolvedTo.ID, *to), tfl.JourneyOptions{Date: *date, Time: *when, Modes: csvArgs(*mode), Preference: "LeastTime"})
+	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
+		fmt.Fprintln(stderr, err)
+		return exitcode.Network
+	}
+	quote := journeyFareQuote(resp, resolvedFrom, resolvedTo, *passenger, *payment, *date, *when)
+	code := exitcode.OK
+	if quote.Status != "ok" {
+		code = exitcode.NoData
+	}
+	return writeFareQuote(g, stdout, stderr, quote, code)
+}
+
+func journeyFareQuote(resp tfl.JourneyResponse, from, to tfl.MatchedStop, passenger, payment, date, when string) tfl.FareQuote {
+	quote := tfl.FareQuote{Status: "no_data", Kind: "journey", From: from.Name, FromID: from.ID, To: to.Name, ToID: to.ID, PassengerType: passenger, Payment: canonicalFarePayment(payment), Currency: "GBP", Fares: []tfl.FareOption{}, Source: "TfL Journey Planner fare", Notes: []string{"TfL Journey Planner fares can vary by route, direction, time, and service."}}
+	if date != "" || when != "" {
+		quote.Time = strings.TrimSpace(strings.TrimSpace(date) + " " + strings.TrimSpace(when))
+	}
+	if len(resp.Journeys) == 0 || resp.Journeys[0].Fare == nil {
+		quote.Message = "TfL returned no fare for that journey."
+		return quote
+	}
+	fare := resp.Journeys[0].Fare
+	quote.Status = "ok"
+	quote.AmountPence = fare.TotalCost
+	for _, item := range fare.Fares {
+		name := strings.TrimSpace(item.ChargeLevel)
+		if name == "" {
+			name = "Fare"
+		}
+		option := tfl.FareOption{Name: name, Payment: []string{"contactless", "oyster"}, Time: canonicalFareTime(item.ChargeLevel), AmountPence: firstNonZeroInt(item.Cost, fare.TotalCost), Currency: "GBP"}
+		quote.Fares = append(quote.Fares, option)
+		if item.LowZone > 0 && item.HighZone > 0 {
+			quote.Zones = inclusiveZones(item.LowZone, item.HighZone)
+		}
+	}
+	if len(quote.Fares) == 0 && fare.TotalCost > 0 {
+		quote.Fares = append(quote.Fares, tfl.FareOption{Name: "Fare", Payment: []string{"contactless", "oyster"}, AmountPence: fare.TotalCost, Currency: "GBP"})
+	}
+	quote.Message = fmt.Sprintf("TfL fare from %s to %s is %s.", quote.From, quote.To, formatPounds(quote.AmountPence))
+	return quote
+}
+
+func resolveFareStation(ctx context.Context, client *tfl.Client, query string, modes []string) (tfl.MatchedStop, error) {
+	resp, err := client.StopSearchWithOptions(ctx, query, tfl.StopSearchOptions{Modes: modes, MaxResults: 1, IncludeHubs: true})
+	if err != nil {
+		return tfl.MatchedStop{}, err
+	}
+	if len(resp.Matches) == 0 {
+		return tfl.MatchedStop{}, fmt.Errorf("TfL found no station matching %q", query)
+	}
+	match := resp.Matches[0]
+	if strings.TrimSpace(match.ID) == "" {
+		return tfl.MatchedStop{}, fmt.Errorf("TfL station match for %q has no stop ID", query)
+	}
+	return match, nil
+}
+
+func writeFareResolutionError(g globals, stdout, stderr io.Writer, field, query string, err error) int {
+	result := map[string]any{"status": "station_not_found", "field": field, "query": query, "message": err.Error()}
+	if g.format == output.JSON {
+		return writeJSON(g, stdout, stderr, result)
+	}
+	fmt.Fprintln(stderr, err)
+	return exitcode.NoData
+}
+
+type zoneFareBand struct {
+	PeakPence      int
+	OffPeakPence   int
+	CashPence      int
+	DailyCapPence  int
+	WeeklyCapPence int
+}
+
+var zoneOneFareBands = map[int]zoneFareBand{
+	1: {PeakPence: 310, OffPeakPence: 300, CashPence: 700, DailyCapPence: 890, WeeklyCapPence: 4470},
+	2: {PeakPence: 360, OffPeakPence: 310, CashPence: 700, DailyCapPence: 890, WeeklyCapPence: 4470},
+	3: {PeakPence: 390, OffPeakPence: 330, CashPence: 700, DailyCapPence: 1050, WeeklyCapPence: 5250},
+	4: {PeakPence: 480, OffPeakPence: 360, CashPence: 700, DailyCapPence: 1280, WeeklyCapPence: 6420},
+	5: {PeakPence: 530, OffPeakPence: 380, CashPence: 700, DailyCapPence: 1530, WeeklyCapPence: 7640},
+	6: {PeakPence: 590, OffPeakPence: 400, CashPence: 700, DailyCapPence: 1630, WeeklyCapPence: 8160},
+}
+
+func zoneFareQuote(fromZone, toZone int, passenger, payment, when string) (tfl.FareQuote, int) {
+	payment = canonicalFarePayment(payment)
+	when = canonicalFareTime(when)
+	if payment == "cash" {
+		when = "anytime"
+	}
+	minZone, maxZone := minMaxZone(fromZone, toZone)
+	quote := tfl.FareQuote{Status: "ok", Kind: "zonal", FromZone: fromZone, ToZone: toZone, Zones: inclusiveZones(fromZone, toZone), PassengerType: passenger, Payment: payment, Time: when, Currency: "GBP", Source: "TfL 2026 adult PAYG fares and caps", Notes: []string{"For exact station pairs, use tfl fares --from/--to because some fares vary by route, direction, and National Rail acceptance."}}
+	if passenger != "" && !strings.EqualFold(passenger, "Adult") {
+		quote.Status = "unsupported"
+		quote.Message = "Zonal fare lookup currently supports Adult fares only; use station fare finder for other passenger types."
+		quote.Fares = []tfl.FareOption{}
+		return quote, exitcode.NoData
+	}
+	if minZone < 1 || maxZone > 6 {
+		quote.Status = "unsupported"
+		quote.Message = "Zonal fare lookup currently supports zones 1-6 only."
+		quote.Fares = []tfl.FareOption{}
+		return quote, exitcode.NoData
+	}
+	var band zoneFareBand
+	if minZone == 1 {
+		band = zoneOneFareBands[maxZone]
+	} else if fromZone == toZone {
+		band = zoneFareBand{PeakPence: 230, OffPeakPence: 220, CashPence: 700}
+	} else {
+		quote.Status = "unsupported"
+		quote.Message = "Non-Zone-1 multi-zone single fares vary; use station fare finder with --from and --to."
+		quote.Fares = []tfl.FareOption{}
+		return quote, exitcode.NoData
+	}
+	quote.Fares = []tfl.FareOption{
+		{Name: "Peak", Payment: []string{"contactless", "oyster"}, Time: "peak", AmountPence: band.PeakPence, Currency: "GBP"},
+		{Name: "Off Peak", Payment: []string{"contactless", "oyster"}, Time: "off-peak", AmountPence: band.OffPeakPence, Currency: "GBP"},
+		{Name: "Cash", Payment: []string{"cash"}, Time: "anytime", AmountPence: band.CashPence, Currency: "GBP"},
+	}
+	if band.DailyCapPence > 0 {
+		quote.Fares = append(quote.Fares, tfl.FareOption{Name: "Daily cap", Payment: []string{"contactless", "oyster"}, Time: "anytime", AmountPence: band.DailyCapPence, Currency: "GBP"})
+	}
+	if band.WeeklyCapPence > 0 {
+		quote.Fares = append(quote.Fares, tfl.FareOption{Name: "Weekly cap", Payment: []string{"contactless", "oyster"}, Time: "anytime", AmountPence: band.WeeklyCapPence, Currency: "GBP"})
+	}
+	quote.AmountPence = selectFareAmount(quote.Fares, payment, when)
+	if quote.AmountPence == 0 {
+		quote.Status = "unsupported"
+		quote.Message = "No matching fare for that payment/time combination."
+		if when == "anytime" && (payment == "contactless" || payment == "oyster") {
+			quote.Message = "Contactless and Oyster single fares need --period peak or --period off-peak; caps are listed separately."
+		}
+		return quote, exitcode.NoData
+	}
+	quote.Message = fmt.Sprintf("%s fare for zones %d-%d is %s.", fareLabel(when, payment), minZone, maxZone, formatPounds(quote.AmountPence))
+	return quote, exitcode.OK
+}
+
+func writeFareQuote(g globals, stdout, stderr io.Writer, quote tfl.FareQuote, code int) int {
+	if quote.Fares == nil {
+		quote.Fares = []tfl.FareOption{}
+	}
+	if g.format == output.JSON {
+		if writeCode := writeJSON(g, stdout, stderr, quote); writeCode != exitcode.OK {
+			return writeCode
+		}
+		return code
+	}
+	if g.format == output.Plain {
+		var rows [][]string
+		for _, fare := range quote.Fares {
+			rows = append(rows, []string{quote.Status, quote.Kind, fare.Name, strings.Join(fare.Payment, ","), fare.Time, formatPounds(fare.AmountPence)})
+		}
+		_ = output.WritePlainRows(stdout, rows)
+		return code
+	}
+	fmt.Fprintln(stdout, quote.Message)
+	for _, fare := range quote.Fares {
+		fmt.Fprintf(stdout, "  %s: %s\n", fare.Name, formatPounds(fare.AmountPence))
+	}
+	return code
+}
+
+func canonicalFarePayment(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "contactless":
+		return "contactless"
+	case "oyster":
+		return "oyster"
+	case "cash":
+		return "cash"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func canonicalFareTime(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "peak":
+		return "peak"
+	case "offpeak", "off-peak", "off peak":
+		return "off-peak"
+	case "any", "anytime":
+		return "anytime"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func selectFareAmount(fares []tfl.FareOption, payment, when string) int {
+	for _, fare := range fares {
+		if isFareCap(fare) {
+			continue
+		}
+		if when == "anytime" {
+			if fare.Time != "anytime" {
+				continue
+			}
+		} else if fare.Time != when {
+			continue
+		}
+		if fareSupportsPayment(fare, payment) {
+			return fare.AmountPence
+		}
+	}
+	return 0
+}
+
+func isFareCap(fare tfl.FareOption) bool {
+	return strings.Contains(strings.ToLower(fare.Name), "cap")
+}
+
+func fareSupportsPayment(fare tfl.FareOption, payment string) bool {
+	for _, option := range fare.Payment {
+		if strings.EqualFold(option, payment) {
+			return true
+		}
+	}
+	return payment == ""
+}
+
+func fareLabel(when, payment string) string {
+	parts := strings.Fields(strings.ReplaceAll(when+" "+payment, "-", " "))
+	for i := range parts {
+		parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatPounds(pence int) string {
+	return fmt.Sprintf("£%d.%02d", pence/100, pence%100)
+}
+
+func minMaxZone(a, b int) (int, int) {
+	if a < b {
+		return a, b
+	}
+	return b, a
+}
+
+func firstNonZeroInt(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func inclusiveZones(a, b int) []int {
+	minZone, maxZone := minMaxZone(a, b)
+	zones := make([]int, 0, maxZone-minZone+1)
+	for zone := minZone; zone <= maxZone; zone++ {
+		zones = append(zones, zone)
+	}
+	return zones
+}
+
 type watchResult struct {
 	Status            string        `json:"status"`
 	Message           string        `json:"message"`
@@ -1917,5 +2243,6 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  tfl arrivals --stop ID       Show live arrivals")
 	fmt.Fprintln(w, "  tfl next-arrival ...         Resolve a stop query and show the next arrival")
 	fmt.Fprintln(w, "  tfl journey --from A --to B  Plan a London journey")
+	fmt.Fprintln(w, "  tfl fare ...                 Estimate TfL PAYG fares")
 	fmt.Fprintln(w, "  tfl watch-arrival ...        One-shot live arrival check")
 }

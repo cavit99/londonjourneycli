@@ -34,6 +34,15 @@ Useful journey flags map directly to TfL Journey Planner parameters:
 - --real-time and --between-entrances
 - --local-only to disable TfL nationalSearch
 
+## Fares
+
+    londonjourneycli --json tfl fare --from-zone 3 --to-zone 1 --period peak --payment contactless
+    londonjourneycli --json tfl fare --from "Tottenham Hale Underground Station" --to "Oxford Circus Underground Station" --date 20260519 --time 0800 --mode tube
+
+For exact station pairs, fares come from TfL Journey Planner's fare JSON for the planned journey. Pass --date and --time when peak/off-peak, direction, or route-specific rail acceptance matters.
+
+For simple adult PAYG questions such as "Zone 3 to Zone 1 contactless peak", use --from-zone/--to-zone. The built-in zonal table covers standard adult zones 1-6 fares and caps; use station-pair lookup for anything route-sensitive or outside that table.
+
 ## Stop Search
 
     londonjourneycli tfl stop-search "London Bridge"

@@ -54,6 +54,35 @@ type StopPoint struct {
 	Children   []StopPoint `json:"children,omitempty"`
 }
 
+type FareQuote struct {
+	Status        string       `json:"status"`
+	Message       string       `json:"message"`
+	Kind          string       `json:"kind"`
+	From          string       `json:"from,omitempty"`
+	FromID        string       `json:"fromId,omitempty"`
+	To            string       `json:"to,omitempty"`
+	ToID          string       `json:"toId,omitempty"`
+	FromZone      int          `json:"fromZone,omitempty"`
+	ToZone        int          `json:"toZone,omitempty"`
+	Zones         []int        `json:"zones,omitempty"`
+	PassengerType string       `json:"passengerType"`
+	Payment       string       `json:"payment,omitempty"`
+	Time          string       `json:"time,omitempty"`
+	AmountPence   int          `json:"amountPence,omitempty"`
+	Currency      string       `json:"currency"`
+	Fares         []FareOption `json:"fares"`
+	Source        string       `json:"source"`
+	Notes         []string     `json:"notes,omitempty"`
+}
+
+type FareOption struct {
+	Name        string   `json:"name"`
+	Payment     []string `json:"payment,omitempty"`
+	Time        string   `json:"time,omitempty"`
+	AmountPence int      `json:"amountPence"`
+	Currency    string   `json:"currency"`
+}
+
 type StopPointsResponse struct {
 	StopPoints []StopPoint `json:"stopPoints"`
 }
@@ -185,10 +214,33 @@ type JourneyVector struct {
 }
 
 type Journey struct {
-	StartDateTime   string `json:"startDateTime"`
-	ArrivalDateTime string `json:"arrivalDateTime"`
-	Duration        int    `json:"duration"`
-	Legs            []Leg  `json:"legs"`
+	StartDateTime   string       `json:"startDateTime"`
+	ArrivalDateTime string       `json:"arrivalDateTime"`
+	Duration        int          `json:"duration"`
+	Legs            []Leg        `json:"legs"`
+	Fare            *JourneyFare `json:"fare,omitempty"`
+}
+
+type JourneyFare struct {
+	TotalCost int          `json:"totalCost"`
+	Fares     []FareItem   `json:"fares,omitempty"`
+	Caveats   []FareCaveat `json:"caveats,omitempty"`
+}
+
+type FareItem struct {
+	LowZone           int    `json:"lowZone,omitempty"`
+	HighZone          int    `json:"highZone,omitempty"`
+	Cost              int    `json:"cost,omitempty"`
+	Peak              int    `json:"peak,omitempty"`
+	OffPeak           int    `json:"offPeak,omitempty"`
+	ChargeProfileName string `json:"chargeProfileName,omitempty"`
+	ChargeLevel       string `json:"chargeLevel,omitempty"`
+	TicketType        string `json:"ticketType,omitempty"`
+}
+
+type FareCaveat struct {
+	Text string `json:"text,omitempty"`
+	Type string `json:"type,omitempty"`
 }
 
 type Leg struct {

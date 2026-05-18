@@ -16,6 +16,8 @@ Examples:
     londonjourneycli tfl status --line victoria
     londonjourneycli --json tfl disruptions --mode tube,dlr,elizabeth-line,overground,tram
     londonjourneycli --json tfl line-routes --line victoria
+    londonjourneycli --json tfl fare --from-zone 3 --to-zone 1 --period peak --payment contactless
+    londonjourneycli --json tfl fare --from "Tottenham Hale Underground Station" --to "Oxford Circus Underground Station" --date 20260519 --time 0800 --mode tube
     londonjourneycli --json tfl nearby-stops --lat 51.505 --lon -0.087 --mode bus --limit 5
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl arrivals --stop 490000235N --line 43
@@ -23,3 +25,5 @@ Examples:
     londonjourneycli --json tfl stop-info --stop 490G00008459
 
 For time-critical heads-ups, use londonjourneycli tfl watch-arrival from OpenClaw cron with explicit visible delivery. Prefer --query for user-named stops and --stop only when you already have the TfL stop ID.
+
+Use tfl fare for fare/cost questions. Prefer exact stations with date/time for route-sensitive answers; use zone lookup for simple adult PAYG zone questions.
