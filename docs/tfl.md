@@ -36,8 +36,11 @@ Useful journey flags map directly to TfL Journey Planner parameters:
     londonjourneycli tfl stop-search "London Bridge"
     londonjourneycli tfl stop-search "Ildersly Grove" --mode bus --line N3
     londonjourneycli --json tfl stop-info --stop 490G00008459
+    londonjourneycli --json tfl nearby-stops --lat 51.505 --lon -0.087 --mode bus --radius 500 --limit 5
 
 Use stop-info when stop-search returns a parent stop group and you need the concrete child stop IDs/letters for arrivals. Arrivals and watch-arrival also try those child stops automatically when a parent stop has no direct line predictions.
+
+Use nearby-stops when an agent has coordinates from a resolved address/current location and needs candidate stop IDs around that point.
 
 ## Live Arrivals
 

@@ -23,6 +23,8 @@ JSON mode structures TfL API errors that return HTTP responses, including status
 
 Use tfl status and tfl disruptions before giving time-sensitive route advice when delays would change the recommendation.
 
+Use tfl nearby-stops when the user gives a current GPS/location coordinate or when a resolved address yields coordinates and the agent needs concrete stop IDs nearby.
+
 ## Time-Critical Alerts
 
 For transport, delivery, pickup, and deadline warnings, a silent run is a failure. Use commands that expose all terminal states as data, and configure visible delivery where required.

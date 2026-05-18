@@ -60,6 +60,7 @@ TfL examples:
     londonjourneycli tfl stop-search "London Bridge"
     londonjourneycli tfl stop-search "Ildersly Grove" --mode bus --line N3
     londonjourneycli --json tfl stop-info --stop 490G00008459
+    londonjourneycli --json tfl nearby-stops --lat 51.505 --lon -0.087 --mode bus --limit 5
     londonjourneycli tfl status --line victoria
     londonjourneycli --json tfl disruptions --mode tube,dlr,elizabeth-line,overground,tram
     londonjourneycli --json --output 0.lineStatuses.0.statusSeverityDescription tfl status --line victoria

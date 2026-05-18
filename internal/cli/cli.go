@@ -581,7 +581,7 @@ func runArgvWithIO(ctx context.Context, argv []string, opts runOptions, stdout, 
 
 func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|stop-search|stop-info|arrivals|next-arrival|journey|watch-arrival>")
+		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|nearby-stops|stop-search|stop-info|arrivals|next-arrival|journey|watch-arrival>")
 		return exitcode.Usage
 	}
 	client := tfl.NewClient(os.Getenv("TFL_APP_KEY"))
@@ -593,6 +593,8 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 		return tflStatus(ctx, g, client, args[1:], stdout, stderr)
 	case "disruptions":
 		return tflDisruptions(ctx, g, client, args[1:], stdout, stderr)
+	case "nearby-stops":
+		return tflNearbyStops(ctx, g, client, args[1:], stdout, stderr)
 	case "stop-search":
 		return tflStopSearch(ctx, g, client, args[1:], stdout, stderr)
 	case "stop-info":
@@ -702,6 +704,77 @@ func tflDisruptions(ctx context.Context, g globals, client *tfl.Client, args []s
 		fmt.Fprintf(stdout, "%s: %s\n", label, disruptionText(d))
 	}
 	return exitcode.OK
+}
+
+func tflNearbyStops(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("nearby-stops", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	lat := fs.Float64("lat", 0, "latitude")
+	lon := fs.Float64("lon", 0, "longitude")
+	radius := fs.Int("radius", 500, "search radius in metres")
+	mode := fs.String("mode", "bus", "comma-separated modes")
+	stopTypes := fs.String("stop-type", "NaptanPublicBusCoachTram", "comma-separated TfL stop types")
+	limit := fs.Int("limit", 10, "maximum stops")
+	if err := fs.Parse(args); err != nil {
+		return exitcode.Usage
+	}
+	if !flagSeen(fs, "lat") || !flagSeen(fs, "lon") {
+		fmt.Fprintln(stderr, "--lat and --lon are required")
+		return exitcode.Usage
+	}
+	if *radius <= 0 {
+		fmt.Fprintln(stderr, "--radius must be > 0")
+		return exitcode.Usage
+	}
+	if *limit <= 0 {
+		fmt.Fprintln(stderr, "--limit must be > 0")
+		return exitcode.Usage
+	}
+	stops, err := client.NearbyStops(ctx, tfl.NearbyStopOptions{Lat: *lat, Lon: *lon, Radius: *radius, Modes: csvArgs(*mode), StopTypes: csvArgs(*stopTypes), Limit: *limit})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitcode.Network
+	}
+	if stops == nil {
+		stops = []tfl.StopPoint{}
+	}
+	if g.format == output.JSON {
+		return writeJSON(g, stdout, stderr, stops)
+	}
+	if g.format == output.Plain {
+		var rows [][]string
+		for _, stop := range stops {
+			rows = append(rows, []string{stop.ID, stop.CommonName, stop.Indicator, stop.StopLetter, fmt.Sprintf("%.0f", stopDistanceMeters(stop)), fmt.Sprintf("%.5f", stop.Lat), fmt.Sprintf("%.5f", stop.Lon), strings.Join(stop.Modes, ",")})
+		}
+		_ = output.WritePlainRows(stdout, rows)
+		return exitcode.OK
+	}
+	if len(stops) == 0 {
+		fmt.Fprintln(stdout, "No nearby stops found.")
+		return exitcode.OK
+	}
+	for _, stop := range stops {
+		label := strings.TrimSpace(strings.Join([]string{stop.CommonName, stop.Indicator, stop.StopLetter}, " "))
+		fmt.Fprintf(stdout, "%s\t%s\t%.0fm\n", stop.ID, label, stopDistanceMeters(stop))
+	}
+	return exitcode.OK
+}
+
+func stopDistanceMeters(stop tfl.StopPoint) float64 {
+	if stop.Distance == nil {
+		return 0
+	}
+	return *stop.Distance
+}
+
+func flagSeen(fs *flag.FlagSet, name string) bool {
+	seen := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			seen = true
+		}
+	})
+	return seen
 }
 
 func tflStopInfo(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
@@ -1527,6 +1600,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  test <skill>                 Run manifest tests")
 	fmt.Fprintln(w, "  tfl status [--line ID]       Show live TfL line status")
 	fmt.Fprintln(w, "  tfl disruptions [--line ID]  Show active TfL disruptions")
+	fmt.Fprintln(w, "  tfl nearby-stops --lat --lon Find stops near coordinates")
 	fmt.Fprintln(w, "  tfl stop-search <query>      Search TfL stops and stations")
 	fmt.Fprintln(w, "  tfl stop-info --stop ID      Show a stop point and child stops")
 	fmt.Fprintln(w, "  tfl arrivals --stop ID       Show live arrivals")

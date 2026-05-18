@@ -18,6 +18,9 @@ commands:
   - name: disruptions
     description: Check active TfL disruptions.
     exec: [londonjourneycli, tfl, disruptions]
+  - name: nearby-stops
+    description: Find TfL stops near coordinates.
+    exec: [londonjourneycli, tfl, nearby-stops]
   - name: journey
     description: Plan a journey with TfL.
     exec: [londonjourneycli, tfl, journey]

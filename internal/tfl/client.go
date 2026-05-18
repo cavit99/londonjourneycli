@@ -42,13 +42,19 @@ type MatchedStop struct {
 
 type StopPoint struct {
 	ID         string      `json:"id"`
+	NaptanID   string      `json:"naptanId,omitempty"`
 	CommonName string      `json:"commonName"`
 	Indicator  string      `json:"indicator,omitempty"`
 	StopLetter string      `json:"stopLetter,omitempty"`
 	Lat        float64     `json:"lat"`
 	Lon        float64     `json:"lon"`
+	Distance   *float64    `json:"distance,omitempty"`
 	Modes      []string    `json:"modes,omitempty"`
 	Children   []StopPoint `json:"children,omitempty"`
+}
+
+type StopPointsResponse struct {
+	StopPoints []StopPoint `json:"stopPoints"`
 }
 
 type Arrival struct {
@@ -236,6 +242,57 @@ func (c *Client) StopPoint(ctx context.Context, stopID string) (StopPoint, error
 		return out, err
 	}
 	return out, c.getJSON(ctx, u, &out)
+}
+
+type NearbyStopOptions struct {
+	Lat       float64
+	Lon       float64
+	Radius    int
+	Modes     []string
+	StopTypes []string
+	Limit     int
+}
+
+func (c *Client) NearbyStops(ctx context.Context, opts NearbyStopOptions) ([]StopPoint, error) {
+	params := url.Values{}
+	params.Set("lat", fmt.Sprintf("%.6f", opts.Lat))
+	params.Set("lon", fmt.Sprintf("%.6f", opts.Lon))
+	if opts.Radius > 0 {
+		params.Set("radius", fmt.Sprintf("%d", opts.Radius))
+	}
+	setCSVParam(params, "modes", opts.Modes)
+	setCSVParam(params, "stopTypes", opts.StopTypes)
+	u, err := c.endpoint("/StopPoint", params)
+	if err != nil {
+		return nil, err
+	}
+	var out StopPointsResponse
+	if err := c.getJSON(ctx, u, &out); err != nil {
+		return nil, err
+	}
+	stops := out.StopPoints
+	if stops == nil {
+		stops = []StopPoint{}
+	}
+	for i := range stops {
+		if stops[i].ID == "" {
+			stops[i].ID = stops[i].NaptanID
+		}
+	}
+	sort.SliceStable(stops, func(i, j int) bool {
+		return stopDistance(stops[i]) < stopDistance(stops[j])
+	})
+	if opts.Limit >= 0 && opts.Limit < len(stops) {
+		stops = stops[:opts.Limit]
+	}
+	return stops, nil
+}
+
+func stopDistance(stop StopPoint) float64 {
+	if stop.Distance == nil {
+		return 1 << 62
+	}
+	return *stop.Distance
 }
 
 func (c *Client) LineStatus(ctx context.Context, lines, modes []string) ([]LineStatus, error) {

@@ -215,6 +215,9 @@ func TestTFLCommandUsageEdges(t *testing.T) {
 	}{
 		{name: "stop info missing stop", args: []string{"tfl", "stop-info"}, code: exitcode.Usage, want: "--stop is required"},
 		{name: "stop search missing query", args: []string{"tfl", "stop-search"}, code: exitcode.Usage, want: "usage: londonjourneycli tfl stop-search"},
+		{name: "nearby missing coordinates", args: []string{"tfl", "nearby-stops"}, code: exitcode.Usage, want: "--lat and --lon are required"},
+		{name: "nearby bad radius", args: []string{"tfl", "nearby-stops", "--lat", "51", "--lon", "-0.1", "--radius", "0"}, code: exitcode.Usage, want: "--radius must be > 0"},
+		{name: "nearby bad limit", args: []string{"tfl", "nearby-stops", "--lat", "51", "--lon", "-0.1", "--limit", "0"}, code: exitcode.Usage, want: "--limit must be > 0"},
 		{name: "stop search missing flag value", args: []string{"tfl", "stop-search", "London", "--mode"}, code: exitcode.Usage, want: "--mode requires a value"},
 		{name: "stop search bad max results", args: []string{"tfl", "stop-search", "London", "--max-results", "bad"}, code: exitcode.Usage, want: "invalid syntax"},
 		{name: "stop search negative max results", args: []string{"tfl", "stop-search", "London", "--max-results", "-1"}, code: exitcode.Usage, want: "--max-results must be >= 0"},

@@ -23,6 +23,19 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("{\"Query\":\"London Bridge\",\"Total\":1,\"Matches\":[{\"ID\":\"490000139R\",\"Name\":\"London Bridge Station\",\"Lat\":51.5,\"Lon\":-0.08,\"Modes\":[\"bus\"]}]}"))
 	})
+	mux.HandleFunc("/StopPoint", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("modes"); got != "bus" {
+			t.Fatalf("modes=%q", got)
+		}
+		if got := r.URL.Query().Get("stopTypes"); got != "NaptanPublicBusCoachTram" {
+			t.Fatalf("stopTypes=%q", got)
+		}
+		if r.URL.Query().Get("radius") == "1" {
+			_, _ = w.Write([]byte("{\"stopPoints\":[]}"))
+			return
+		}
+		_, _ = w.Write([]byte("{\"stopPoints\":[{\"naptanId\":\"490FAR\",\"commonName\":\"Far Stop\",\"lat\":51.51,\"lon\":-0.09,\"distance\":100,\"modes\":[\"bus\"]},{\"id\":\"490000139R\",\"commonName\":\"London Bridge Bus Station\",\"indicator\":\"Stop D\",\"stopLetter\":\"D\",\"lat\":51.5,\"lon\":-0.08,\"distance\":42,\"modes\":[\"bus\"]}]}"))
+	})
 	mux.HandleFunc("/StopPoint/490000139R/Arrivals", func(w http.ResponseWriter, r *http.Request) {
 		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
 		_, _ = w.Write([]byte(body))
@@ -59,6 +72,11 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		{name: "disruptions", args: []string{"--plain", "tfl", "disruptions", "--line", "victoria"}, want: "victoria\tVictoria\tRealTime\tlineInfo\tMinor platform crowding", code: exitcode.OK},
 		{name: "disruptions empty json", args: []string{"--json", "tfl", "disruptions"}, want: "[]", code: exitcode.OK},
 		{name: "disruptions empty human", args: []string{"tfl", "disruptions"}, want: "No active disruptions found.", code: exitcode.OK},
+		{name: "nearby stops", args: []string{"--json", "tfl", "nearby-stops", "--lat", "51.505", "--lon", "-0.087", "--limit", "1"}, want: "London Bridge Bus Station", code: exitcode.OK},
+		{name: "nearby naptan fallback", args: []string{"--json", "tfl", "nearby-stops", "--lat", "51.505", "--lon", "-0.087", "--limit", "2"}, want: "490FAR", code: exitcode.OK},
+		{name: "nearby meridian", args: []string{"--json", "tfl", "nearby-stops", "--lat", "51.48", "--lon", "0", "--limit", "1"}, want: "London Bridge Bus Station", code: exitcode.OK},
+		{name: "nearby plain", args: []string{"--plain", "tfl", "nearby-stops", "--lat", "51.505", "--lon", "-0.087", "--limit", "1"}, want: "490000139R\tLondon Bridge Bus Station\tStop D\tD\t42", code: exitcode.OK},
+		{name: "nearby empty human", args: []string{"tfl", "nearby-stops", "--lat", "51.505", "--lon", "-0.087", "--radius", "1"}, want: "No nearby stops found.", code: exitcode.OK},
 		{name: "search", args: []string{"--json", "tfl", "stop-search", "London Bridge", "--limit", "1"}, want: "London Bridge Station", code: exitcode.OK},
 		{name: "stop-info", args: []string{"--json", "tfl", "stop-info", "--stop", "490G00008459"}, want: "490008459S", code: exitcode.OK},
 		{name: "stop-info output projection", args: []string{"--json", "--output", "id", "tfl", "stop-info", "--stop", "490G00008459"}, want: "\"490G00008459\"", code: exitcode.OK},
