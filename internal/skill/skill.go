@@ -88,7 +88,11 @@ func Discover(roots []string) ([]Skill, error) {
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		err = filepath.WalkDir(abs, func(path string, d os.DirEntry, err error) error {
+		walkRoot := abs
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			walkRoot = resolved
+		}
+		err = filepath.WalkDir(walkRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -97,7 +101,7 @@ func Discover(roots []string) ([]Skill, error) {
 			}
 			base := filepath.Base(path)
 			if strings.HasPrefix(base, ".") || base == "node_modules" || base == "vendor" {
-				if path != abs {
+				if path != walkRoot {
 					return filepath.SkipDir
 				}
 			}
@@ -105,10 +109,14 @@ func Discover(roots []string) ([]Skill, error) {
 			if _, err := os.Stat(skillMD); err != nil {
 				return nil
 			}
-			if seen[path] {
+			seenKey := path
+			if resolved, err := filepath.EvalSymlinks(path); err == nil {
+				seenKey = resolved
+			}
+			if seen[seenKey] {
 				return filepath.SkipDir
 			}
-			seen[path] = true
+			seen[seenKey] = true
 			s, err := Load(path)
 			if err != nil {
 				return err
@@ -153,6 +161,8 @@ func Load(dir string) (Skill, error) {
 		if desc == "" {
 			desc = m.Description
 		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Skill{}, fmt.Errorf("%s: %w", manifestPath, err)
 	}
 	return Skill{Name: name, Description: desc, Path: dir, SkillMD: skillMD, Manifest: manifest, Frontmatter: fm}, nil
 }
@@ -162,15 +172,34 @@ func ParseFrontmatter(raw []byte) (Frontmatter, error) {
 	if !bytes.HasPrefix(trimmed, []byte("---\n")) && !bytes.HasPrefix(trimmed, []byte("---\r\n")) {
 		return Frontmatter{}, nil
 	}
-	parts := bytes.SplitN(trimmed, []byte("---"), 3)
-	if len(parts) < 3 {
+	firstLineEnd := bytes.IndexByte(trimmed, '\n')
+	if firstLineEnd < 0 {
 		return Frontmatter{}, errors.New("unterminated frontmatter")
 	}
-	var fm Frontmatter
-	if err := yaml.Unmarshal(bytes.TrimSpace(parts[1]), &fm); err != nil {
-		return Frontmatter{}, err
+	rest := trimmed[firstLineEnd+1:]
+	for start := 0; start <= len(rest); {
+		lineEnd := bytes.IndexByte(rest[start:], '\n')
+		end := len(rest)
+		next := len(rest) + 1
+		if lineEnd >= 0 {
+			end = start + lineEnd
+			next = end + 1
+		}
+		if isFrontmatterDelimiterLine(rest[start:end]) {
+			var fm Frontmatter
+			if err := yaml.Unmarshal(bytes.TrimSpace(rest[:start]), &fm); err != nil {
+				return Frontmatter{}, err
+			}
+			return fm, nil
+		}
+		start = next
 	}
-	return fm, nil
+	return Frontmatter{}, errors.New("unterminated frontmatter")
+}
+
+func isFrontmatterDelimiterLine(line []byte) bool {
+	line = bytes.TrimRight(line, " \t\r")
+	return bytes.Equal(line, []byte("---"))
 }
 
 func Lint(skills []Skill) []Issue {

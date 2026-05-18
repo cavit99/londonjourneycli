@@ -32,6 +32,8 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 				t.Fatalf("modes query=%q", got)
 			}
 			_, _ = w.Write([]byte("{\"Query\":\"Oxford Circus\",\"Total\":1,\"Matches\":[{\"ID\":\"940GZZLUOXC\",\"Name\":\"Oxford Circus Underground Station\",\"Lat\":51.515224,\"Lon\":-0.141903,\"Modes\":[\"tube\"],\"topMostParentId\":\"940GZZLUOXC\"}]}"))
+		case "Missing Station":
+			_, _ = w.Write([]byte("{\"Query\":\"Missing Station\",\"Total\":0,\"Matches\":[]}"))
 		default:
 			_, _ = w.Write([]byte("{\"Query\":\"London Bridge\",\"Total\":1,\"Matches\":[{\"ID\":\"490000139R\",\"Name\":\"London Bridge Station\",\"Lat\":51.5,\"Lon\":-0.08,\"Modes\":[\"bus\"]}]}"))
 		}
@@ -133,10 +135,13 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		{name: "next arrival query", args: []string{"--json", "tfl", "next-arrival", "--query", "London Bridge", "--line", "43"}, want: "\"resolvedStop\": {", code: exitcode.OK},
 		{name: "journey", args: []string{"tfl", "journey", "--from", "London Bridge", "--to", "Paddington"}, want: "Option 1", code: exitcode.OK},
 		{name: "station fare json", args: []string{"--json", "tfl", "fare", "--from", "Tottenham Hale", "--from-id", "940GZZLUTMH", "--to", "Oxford Circus", "--to-id", "940GZZLUOXC", "--date", "20260519", "--time", "0800", "--mode", "tube"}, want: "\"amountPence\": 390", code: exitcode.OK},
+		{name: "station fare missing from json", args: []string{"--json", "tfl", "fare", "--from", "Missing Station", "--to", "Oxford Circus", "--to-id", "940GZZLUOXC", "--mode", "tube"}, want: "\"status\": \"station_not_found\"", code: exitcode.NoData},
+		{name: "station fare missing from json envelope", args: []string{"--json", "--envelope", "tfl", "fare", "--from", "Missing Station", "--to", "Oxford Circus", "--to-id", "940GZZLUOXC", "--mode", "tube"}, want: "\"ok\": false", code: exitcode.NoData},
 		{name: "station fare plain", args: []string{"--plain", "tfl", "fares", "--from", "Tottenham Hale", "--from-id", "940GZZLUTMH", "--to", "Oxford Circus", "--to-id", "940GZZLUOXC", "--date", "20260519", "--time", "0800", "--mode", "tube"}, want: "ok\tjourney\tPeak\tcontactless,oyster\tpeak\t£3.90", code: exitcode.OK},
 		{name: "zone fare", args: []string{"--json", "tfl", "fares", "--from-zone", "3", "--to-zone", "1", "--period", "peak", "--payment", "contactless"}, want: "\"amountPence\": 390", code: exitcode.OK},
 		{name: "zone cash fare ignores period", args: []string{"--json", "tfl", "fares", "--from-zone", "3", "--to-zone", "1", "--payment", "cash"}, want: "\"amountPence\": 700", code: exitcode.OK},
 		{name: "zone anytime does not promote cap as single fare", args: []string{"--json", "tfl", "fares", "--from-zone", "3", "--to-zone", "1", "--period", "anytime", "--payment", "contactless"}, want: "\"status\": \"unsupported\"", code: exitcode.NoData},
+		{name: "zone anytime json envelope failure", args: []string{"--json", "--envelope", "tfl", "fares", "--from-zone", "3", "--to-zone", "1", "--period", "anytime", "--payment", "contactless"}, want: "\"ok\": false", code: exitcode.NoData},
 		{name: "watch", args: []string{"--json", "tfl", "watch-arrival", "--stop", "490000139R", "--line", "43", "--threshold", "2m", "--dry-run"}, want: "\"status\": \"due\"", code: exitcode.OK},
 		{name: "watch query", args: []string{"--json", "tfl", "watch-arrival", "--query", "London Bridge", "--line", "43", "--threshold", "2m", "--dry-run"}, want: "London Bridge Station", code: exitcode.OK},
 		{name: "watch plain", args: []string{"--plain", "tfl", "watch-arrival", "--stop", "490000139R", "--line", "43", "--threshold", "2m", "--dry-run"}, want: "due\tTransport heads-up:", code: exitcode.OK},

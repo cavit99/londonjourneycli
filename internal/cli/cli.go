@@ -1907,7 +1907,10 @@ func resolveFareStation(ctx context.Context, client *tfl.Client, query string, m
 func writeFareResolutionError(g globals, stdout, stderr io.Writer, field, query string, err error) int {
 	result := map[string]any{"status": "station_not_found", "field": field, "query": query, "message": err.Error()}
 	if g.format == output.JSON {
-		return writeJSON(g, stdout, stderr, result)
+		if code := writeJSONWithOK(g, stdout, stderr, result, false, false); code != exitcode.OK {
+			return code
+		}
+		return exitcode.NoData
 	}
 	fmt.Fprintln(stderr, err)
 	return exitcode.NoData
@@ -1990,7 +1993,7 @@ func writeFareQuote(g globals, stdout, stderr io.Writer, quote tfl.FareQuote, co
 		quote.Fares = []tfl.FareOption{}
 	}
 	if g.format == output.JSON {
-		if writeCode := writeJSON(g, stdout, stderr, quote); writeCode != exitcode.OK {
+		if writeCode := writeJSONWithOK(g, stdout, stderr, quote, code == exitcode.OK, false); writeCode != exitcode.OK {
 			return writeCode
 		}
 		return code

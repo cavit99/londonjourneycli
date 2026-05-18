@@ -40,6 +40,25 @@ func TestLoadDiscoverFindAndLintEdges(t *testing.T) {
 	if len(skills) != 2 {
 		t.Fatalf("skills=%+v", skills)
 	}
+	linkParent := t.TempDir()
+	linkRoot := filepath.Join(linkParent, "skills-link")
+	if err := os.Symlink(root, linkRoot); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	dedupedSkills, err := Discover([]string{root, linkRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dedupedSkills) != 2 {
+		t.Fatalf("symlinked roots should dedupe skills, got %+v", dedupedSkills)
+	}
+	symlinkOnlySkills, err := Discover([]string{linkRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(symlinkOnlySkills) != 2 {
+		t.Fatalf("symlinked root should discover target skills, got %+v", symlinkOnlySkills)
+	}
 	alphaSkill, ok := Find(skills, "alpha")
 	if !ok {
 		t.Fatalf("case-insensitive find failed: %+v", skills)
@@ -98,6 +117,20 @@ func TestLoadAndFrontmatterErrors(t *testing.T) {
 	}
 	if _, err := Load(badManifest); err == nil {
 		t.Fatal("expected manifest parse error")
+	}
+
+	unreadableManifest := filepath.Join(root, "unreadable-manifest")
+	if err := os.MkdirAll(unreadableManifest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unreadableManifest, "SKILL.md"), []byte("---\nname: unreadable-manifest\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(unreadableManifest, "skill.yaml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(unreadableManifest); err == nil || !strings.Contains(err.Error(), "skill.yaml") {
+		t.Fatalf("expected manifest read error, got %v", err)
 	}
 
 	if _, err := ParseFrontmatter([]byte("---\nname: missing close")); err == nil {

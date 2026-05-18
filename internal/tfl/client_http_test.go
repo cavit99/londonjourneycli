@@ -42,7 +42,10 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 				t.Fatalf("categories=%q", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"stopPoints":[{"id":"940GZZLUBND","commonName":"Bond Street Underground Station","lat":51.514304,"lon":-0.149723,"distance":609,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Facility","key":"Lifts","value":"1"}]}]}`))
+			_, _ = w.Write([]byte(`{"stopPoints":[
+				{"id":"940GZZLUBND","commonName":"Bond Street Underground Station","lat":51.514304,"lon":-0.149723,"distance":609,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Facility","key":"Lifts","value":"1"}]},
+				{"id":"940GZZLUGPK","commonName":"Green Park Underground Station","lat":51.506947,"lon":-0.142787,"distance":904,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Facility","key":"Lifts","value":"5"}]}
+			]}`))
 			return
 		}
 		if got := r.URL.Query().Get("modes"); got != "bus" {
@@ -143,6 +146,11 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:03:00Z\",\"TimeToStation\":180,\"VehicleID\":\"a\"},{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
 		_, _ = w.Write([]byte(body))
 	})
+	mux.HandleFunc("/StopPoint/490BADTIME/Arrivals", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Bad\",\"StationName\":\"Broken Stop\",\"PlatformName\":\"D\",\"ExpectedArrival\":\"not-a-time\",\"TimeToStation\":30,\"VehicleID\":\"bad\"},{\"LineName\":\"43\",\"DestinationName\":\"Valid\",\"StationName\":\"Broken Stop\",\"PlatformName\":\"D\",\"ExpectedArrival\":\"2026-05-18T01:02:00Z\",\"TimeToStation\":120,\"VehicleID\":\"valid\"}]"
+		_, _ = w.Write([]byte(body))
+	})
 	mux.HandleFunc("/Journey/JourneyResults/1000139/to/1000174", func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.RawQuery, "journeyPreference=LeastTime") {
 			t.Fatalf("missing journey preference: %s", r.URL.RawQuery)
@@ -194,12 +202,26 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	if len(nearby) != 1 || nearby[0].ID != "490000139R" || nearby[0].Distance == nil || *nearby[0].Distance != 42 {
 		t.Fatalf("unexpected nearby stops: %+v", nearby)
 	}
+	nearbyDefaultLimit, err := c.NearbyStops(context.Background(), NearbyStopOptions{Lat: 51.5, Lon: -0.08, Radius: 500, Modes: []string{"bus"}, StopTypes: []string{"NaptanPublicBusCoachTram"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nearbyDefaultLimit) != 2 || nearbyDefaultLimit[0].ID != "490000139R" || nearbyDefaultLimit[1].ID != "490FAR" {
+		t.Fatalf("unexpected nearby default limit stops: %+v", nearbyDefaultLimit)
+	}
 	stations, err := c.NearbyStopsWithProperties(context.Background(), NearbyStopOptions{Lat: 51.515224, Lon: -0.141903, Radius: 1200, Modes: []string{"tube"}, StopTypes: []string{"NaptanMetroStation"}, Categories: []string{"Accessibility", "Facility"}, Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(stations) != 1 || stations[0].StopType != "NaptanMetroStation" || len(stations[0].AdditionalProperties) != 1 || stations[0].AdditionalProperties[0].Key != "Lifts" {
 		t.Fatalf("unexpected accessible station properties: %+v", stations)
+	}
+	stationsDefaultLimit, err := c.NearbyStopsWithProperties(context.Background(), NearbyStopOptions{Lat: 51.515224, Lon: -0.141903, Radius: 1200, Modes: []string{"tube"}, StopTypes: []string{"NaptanMetroStation"}, Categories: []string{"Accessibility", "Facility"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stationsDefaultLimit) != 2 || stationsDefaultLimit[0].ID != "940GZZLUBND" || stationsDefaultLimit[1].ID != "940GZZLUGPK" {
+		t.Fatalf("unexpected accessible station default limit properties: %+v", stationsDefaultLimit)
 	}
 
 	arrivals, err := c.Arrivals(context.Background(), "490000139R")
@@ -208,6 +230,13 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	}
 	if arrivals[0].VehicleID != "b" {
 		t.Fatalf("arrivals not sorted: %+v", arrivals)
+	}
+	mixedTimestampArrivals, err := c.Arrivals(context.Background(), "490BADTIME")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mixedTimestampArrivals) != 1 || mixedTimestampArrivals[0].VehicleID != "valid" {
+		t.Fatalf("unexpected mixed timestamp arrivals: %+v", mixedTimestampArrivals)
 	}
 	lineArrivals, err := c.LineArrivals(context.Background(), "490000139R", []string{"43"}, "inbound", "")
 	if err != nil {

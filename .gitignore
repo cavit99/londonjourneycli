@@ -3,6 +3,7 @@
 /londonjourneycli
 coverage.out
 .londonjourneycli/
+.clawpatch/
 *.local.*
 .DS_Store
 .idea/

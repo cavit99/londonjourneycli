@@ -364,7 +364,7 @@ func (c *Client) NearbyStops(ctx context.Context, opts NearbyStopOptions) ([]Sto
 	sort.SliceStable(stops, func(i, j int) bool {
 		return stopDistance(stops[i]) < stopDistance(stops[j])
 	})
-	if opts.Limit >= 0 && opts.Limit < len(stops) {
+	if opts.Limit > 0 && opts.Limit < len(stops) {
 		stops = stops[:opts.Limit]
 	}
 	return stops, nil
@@ -387,7 +387,7 @@ func (c *Client) NearbyStopsWithProperties(ctx context.Context, opts NearbyStopO
 	sort.SliceStable(stops, func(i, j int) bool {
 		return stopDistance(stops[i].StopPoint) < stopDistance(stops[j].StopPoint)
 	})
-	if opts.Limit >= 0 && opts.Limit < len(stops) {
+	if opts.Limit > 0 && opts.Limit < len(stops) {
 		stops = stops[:opts.Limit]
 	}
 	return stops, nil
@@ -699,12 +699,19 @@ func (c *Client) getArrivals(ctx context.Context, endpoint string) ([]Arrival, e
 		return []Arrival{}, nil
 	}
 	arrivals := make([]Arrival, 0, len(raw))
+	var parseErr error
 	for _, r := range raw {
 		t, err := time.Parse(time.RFC3339, r.ExpectedArrival)
 		if err != nil {
-			return nil, fmt.Errorf("parse arrival time %q: %w", r.ExpectedArrival, err)
+			if parseErr == nil {
+				parseErr = fmt.Errorf("parse arrival time %q: %w", r.ExpectedArrival, err)
+			}
+			continue
 		}
 		arrivals = append(arrivals, Arrival{LineName: r.LineName, DestinationName: r.DestinationName, StationName: r.StationName, PlatformName: r.PlatformName, Towards: r.Towards, ExpectedArrival: t, TimeToStation: r.TimeToStation, VehicleID: r.VehicleID})
+	}
+	if len(arrivals) == 0 && parseErr != nil {
+		return nil, parseErr
 	}
 	sort.Slice(arrivals, func(i, j int) bool { return arrivals[i].TimeToStation < arrivals[j].TimeToStation })
 	return arrivals, nil

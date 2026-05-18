@@ -15,6 +15,24 @@ func TestParseFrontmatter(t *testing.T) {
 	if fm.Name != "tfl-journey" || fm.Description != "London journeys" {
 		t.Fatalf("unexpected frontmatter: %+v", fm)
 	}
+
+	withDashes := []byte("---\nname: demo\ndescription: \"A --- B\"\n---\n# Body\n")
+	fm, err = ParseFrontmatter(withDashes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fm.Name != "demo" || fm.Description != "A --- B" {
+		t.Fatalf("unexpected dashed frontmatter: %+v", fm)
+	}
+
+	blockScalar := []byte("---\nname: block\ndescription: |\n  before\n  ---\n  after\n---\n# Body\n")
+	fm, err = ParseFrontmatter(blockScalar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fm.Name != "block" || fm.Description != "before\n---\nafter" {
+		t.Fatalf("unexpected block scalar frontmatter: %+v", fm)
+	}
 }
 
 func TestDiscoverAndLint(t *testing.T) {
