@@ -1,0 +1,9 @@
+/bin/
+/dist/
+/londonjourneycli
+coverage.out
+.londonjourneycli/
+*.local.*
+.DS_Store
+.idea/
+.vscode/

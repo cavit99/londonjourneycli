@@ -1,0 +1,13 @@
+version: 2
+
+builds:
+  - main: ./cmd/londonjourneycli
+    binary: londonjourneycli
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
+archives:
+  - formats: [tar.gz]
+
+checksum:
+  name_template: checksums.txt

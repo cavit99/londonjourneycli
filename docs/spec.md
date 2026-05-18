@@ -1,0 +1,73 @@
+# LondonJourneyCLI CLI Spec
+
+## Usage
+
+    londonjourneycli [global flags] <command> [args]
+
+## Global Flags
+
+- --json stable JSON output
+- --plain stable tab-separated output for LondonJourneyCLI-owned output
+- --skills-dir <dir> skill root override
+- --timeout <duration> command timeout, default 30s
+- --no-input declare non-interactive use and export LONDONJOURNEYCLI_NO_INPUT=1 to manifest commands
+
+## Commands
+
+Registry:
+
+- londonjourneycli list
+- londonjourneycli search <query>
+- londonjourneycli show <skill>
+- londonjourneycli lint
+- londonjourneycli doctor <skill>
+- londonjourneycli run <skill> <command> [args...]
+- londonjourneycli test <skill>
+
+TfL:
+
+- londonjourneycli tfl stop-search <query> [--limit N]
+- londonjourneycli tfl arrivals --stop <id> [--line N] [--towards text] [--limit N]
+- londonjourneycli tfl journey --from <origin> --to <destination> [--date YYYYMMDD] [--time HHmm] [--arriving]
+- londonjourneycli tfl watch-arrival --stop <id> --line <line> [--towards text] [--threshold 2m] [--openclaw-channel whatsapp --openclaw-target <target>]
+
+watch-arrival requires --threshold > 0. In --no-input mode, it also requires complete OpenClaw delivery flags or --dry-run.
+
+## Exit Codes
+
+- 0 success
+- 1 generic failure
+- 2 usage or validation error
+- 3 configuration or missing requirement
+- 4 network or API failure
+- 5 no data
+
+Manifest child command failures are mapped to exit code 1. JSON and plain test output include childExitCode when a child process exits non-zero.
+
+## Streams
+
+- stdout contains the result.
+- stderr contains diagnostics.
+- JSON mode never mixes logs into stdout.
+- run streams child stdout/stderr directly; use test --json or test --plain when a structured manifest-command result is needed.
+
+## Skill Discovery
+
+Default roots are:
+
+- ./skills from the current working directory
+- the current directory when its basename is skills
+- LONDONJOURNEYCLI_SKILLS_DIR, split with the OS path-list separator
+- ~/.config/londonjourneycli/skills
+- ~/.local/share/londonjourneycli/skills
+
+Pass --skills-dir <dir> to use exactly one root for a command.
+
+JSON list/show responses include local skill paths. This is useful for agents but may reveal absolute paths in logs.
+
+## Manifest Command Execution
+
+- command exec and test command fields are argv arrays.
+- global flags stop parsing at the first command token, so flags after run subcommands pass through to the child command.
+- command timeout fields are parsed as Go durations and bound the child process.
+- londonjourneycli test returns structured results in --json and --plain modes.

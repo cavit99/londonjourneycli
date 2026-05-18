@@ -1,0 +1,29 @@
+name: tfl-journey
+description: Plan London journeys and check live TfL arrivals through LondonJourneyCLI.
+ownerDomain: london-transport
+triggers:
+  - how do I get to
+  - journey from
+  - next bus
+  - tfl
+safetyLevel: read-only
+cronSafe: true
+requires:
+  bins:
+    - londonjourneycli
+commands:
+  - name: journey
+    description: Plan a journey with TfL.
+    exec: [londonjourneycli, tfl, journey]
+  - name: arrivals
+    description: Check live arrivals at a stop.
+    exec: [londonjourneycli, tfl, arrivals]
+  - name: watch-arrival
+    description: Perform a one-shot live arrival check with optional visible delivery.
+    exec: [londonjourneycli, tfl, watch-arrival]
+tests:
+  - name: stop-search-smoke
+    command: [londonjourneycli, --json, tfl, stop-search, London Bridge, --limit, "1"]
+verification:
+  - Run go test ./...
+  - Run LONDONJOURNEYCLI_LIVE_TFL=1 go test ./internal/tfl -run Live -count=1 -v before releasing TfL changes.

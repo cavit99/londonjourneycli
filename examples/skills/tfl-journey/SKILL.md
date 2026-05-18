@@ -1,0 +1,16 @@
+---
+name: tfl-journey
+description: Plan London journeys and check live TfL arrivals through LondonJourneyCLI.
+---
+
+# TfL Journey
+
+Use LondonJourneyCLI for deterministic London journey planning and live transport checks.
+
+Examples:
+
+    londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
+    londonjourneycli --json tfl arrivals --stop 490000235N --line 43
+    londonjourneycli --json tfl stop-search "London Bridge"
+
+For time-critical heads-ups, use londonjourneycli tfl watch-arrival from OpenClaw cron with explicit visible delivery.
