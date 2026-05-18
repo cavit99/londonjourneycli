@@ -35,11 +35,13 @@ TfL:
 
 watch-arrival requires --threshold > 0. In --no-input mode, it also requires complete OpenClaw delivery flags or --dry-run.
 
+In JSON mode, journey ambiguity from TfL is structured as status "ambiguous" with error.statusCode 300 and error.disambiguation candidate options. Agents should resolve and retry rather than scraping stderr.
+
 ## Exit Codes
 
 - 0 success
 - 1 generic failure
-- 2 usage or validation error
+- 2 usage, validation, or ambiguous TfL place input
 - 3 configuration or missing requirement
 - 4 network or API failure
 - 5 no data

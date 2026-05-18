@@ -2,6 +2,7 @@ package tfl
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,6 +117,35 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	}
 	if len(journey.Journeys) != 1 || journey.Journeys[0].Duration != 30 {
 		t.Fatalf("unexpected journey: %+v", journey)
+	}
+}
+
+func TestJourneyDisambiguationErrorIsStructured(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Journey/JourneyResults/1000139/to/Highgate", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMultipleChoices)
+		_, _ = w.Write([]byte(`{"toLocationDisambiguation":{"matchStatus":"list","disambiguationOptions":[{"parameterValue":"1000109","uri":"/journey/journeyresults/se192xe/to/1000109","place":{"commonName":"Highgate (London), Highgate","placeType":"StopPoint","naptanId":"490000109S","icsCode":"1000109","modes":["tube","bus"],"lat":51.5777,"lon":-0.1457},"matchQuality":1000}]},"fromLocationDisambiguation":{"matchStatus":"identified"},"journeyVector":{"from":"SE192XE","to":"Highgate"}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient("")
+	c.BaseURL = srv.URL
+	_, err := c.Journey(context.Background(), "London Bridge", "Highgate", JourneyOptions{})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T %[1]v", err)
+	}
+	if apiErr.StatusCode != http.StatusMultipleChoices || apiErr.Disambiguation == nil {
+		t.Fatalf("unexpected API error: %+v", apiErr)
+	}
+	if apiErr.Disambiguation.ToLocationDisambiguation == nil {
+		t.Fatalf("missing to-location disambiguation: %+v", apiErr.Disambiguation)
+	}
+	options := apiErr.Disambiguation.ToLocationDisambiguation.DisambiguationOptions
+	if len(options) != 1 || options[0].ParameterValue != "1000109" || options[0].Place.CommonName != "Highgate (London), Highgate" {
+		t.Fatalf("unexpected disambiguation options: %+v", options)
 	}
 }
 

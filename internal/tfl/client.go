@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -74,6 +75,58 @@ type rawArrival struct {
 
 type JourneyResponse struct {
 	Journeys []Journey `json:"journeys"`
+}
+
+type APIError struct {
+	StatusCode     int                   `json:"statusCode"`
+	Message        string                `json:"message"`
+	Disambiguation *DisambiguationResult `json:"disambiguation,omitempty"`
+}
+
+func (e *APIError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("tfl http %d: %s", e.StatusCode, e.Message)
+	}
+	return fmt.Sprintf("tfl http %d", e.StatusCode)
+}
+
+type DisambiguationResult struct {
+	FromLocationDisambiguation *Disambiguation `json:"fromLocationDisambiguation,omitempty"`
+	ToLocationDisambiguation   *Disambiguation `json:"toLocationDisambiguation,omitempty"`
+	ViaLocationDisambiguation  *Disambiguation `json:"viaLocationDisambiguation,omitempty"`
+	JourneyVector              *JourneyVector  `json:"journeyVector,omitempty"`
+}
+
+type Disambiguation struct {
+	MatchStatus           string                 `json:"matchStatus,omitempty"`
+	DisambiguationOptions []DisambiguationOption `json:"disambiguationOptions,omitempty"`
+}
+
+type DisambiguationOption struct {
+	ParameterValue string `json:"parameterValue,omitempty"`
+	URI            string `json:"uri,omitempty"`
+	Place          Place  `json:"place,omitempty"`
+	MatchQuality   int    `json:"matchQuality,omitempty"`
+}
+
+type Place struct {
+	NaptanID   string   `json:"naptanId,omitempty"`
+	ICSCode    string   `json:"icsCode,omitempty"`
+	CommonName string   `json:"commonName,omitempty"`
+	PlaceType  string   `json:"placeType,omitempty"`
+	Modes      []string `json:"modes,omitempty"`
+	Lat        float64  `json:"lat"`
+	Lon        float64  `json:"lon"`
+}
+
+type JourneyVector struct {
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+	Via  string `json:"via,omitempty"`
+	URI  string `json:"uri,omitempty"`
 }
 
 type Journey struct {
@@ -385,9 +438,44 @@ func (c *Client) getJSON(ctx context.Context, endpoint string, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("tfl http %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return parseAPIError(resp.StatusCode, body)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func parseAPIError(status int, body []byte) error {
+	apiErr := &APIError{StatusCode: status, Message: http.StatusText(status)}
+	if status == http.StatusMultipleChoices {
+		var disambig DisambiguationResult
+		if err := json.Unmarshal(body, &disambig); err == nil && hasDisambiguation(disambig) {
+			apiErr.Message = "disambiguation required"
+			apiErr.Disambiguation = &disambig
+			return apiErr
+		}
+	}
+	var msg struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &msg); err == nil {
+		if strings.TrimSpace(msg.Message) != "" {
+			apiErr.Message = msg.Message
+		} else if strings.TrimSpace(msg.Error) != "" {
+			apiErr.Message = msg.Error
+		}
+	}
+	return apiErr
+}
+
+func hasDisambiguation(d DisambiguationResult) bool {
+	return hasDisambiguationOptions(d.FromLocationDisambiguation) ||
+		hasDisambiguationOptions(d.ToLocationDisambiguation) ||
+		hasDisambiguationOptions(d.ViaLocationDisambiguation)
+}
+
+func hasDisambiguationOptions(d *Disambiguation) bool {
+	return d != nil && len(d.DisambiguationOptions) > 0
 }
 
 func sanitizeRequestError(err error) error {

@@ -7,6 +7,8 @@ description: Plan London journeys and check live TfL arrivals through LondonJour
 
 Use LondonJourneyCLI for deterministic London journey planning and live transport checks.
 
+Resolve fuzzy places before journey planning: turn "home", "office", venue names, and vague areas into exact addresses, postcodes, coordinates, or TfL IDs. If "tfl journey --json" returns status "ambiguous", inspect error.disambiguation, retry with the obvious candidate, or ask one clarification.
+
 Examples:
 
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"

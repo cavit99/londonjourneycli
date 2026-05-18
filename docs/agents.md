@@ -8,9 +8,16 @@ LondonJourneyCLI is designed to be driven by agents, cron jobs, and scripts.
 - Pass --no-input in unattended contexts.
 - Pass --skills-dir or set LONDONJOURNEYCLI_SKILLS_DIR; do not rely on private machine paths.
 - Branch on exit code, not stderr text.
+- Resolve fuzzy human places before journey planning. The CLI should receive a postcode, exact address, station/stop ID, coordinates, or a TfL-known alias when possible.
 - Run londonjourneycli doctor <skill> before depending on a skill in a new environment.
 - Run londonjourneycli lint after editing skill manifests.
 - Treat JSON path fields as local machine context. They may contain absolute paths and should not be pasted into public channels.
+
+## Place Resolution
+
+Agents should resolve "home", "office", venue names, and vague areas before calling "tfl journey". Use private user context for personal aliases and an address/postcode/source lookup for venues. If TfL still returns "status: ambiguous" in JSON mode, inspect "error.disambiguation" and retry with the obvious London candidate's parameterValue or exact address. Ask one clarification only when the candidates are genuinely unclear.
+
+JSON mode structures TfL API errors that return HTTP responses, including status "ambiguous" and status "api_error". Lower-level request failures such as DNS or local timeouts can still be stderr-only diagnostics with a non-zero exit code.
 
 ## Time-Critical Alerts
 
@@ -18,7 +25,7 @@ For transport, delivery, pickup, and deadline warnings, a silent run is a failur
 
 For TfL:
 
-    londonjourneycli --json --no-input tfl watch-arrival --stop "$STOP" --line "$LINE" --threshold 2m --openclaw-channel whatsapp --openclaw-target "$TARGET"
+    londonjourneycli --json --no-input tfl watch-arrival --query "$STOP_NAME" --line "$LINE" --threshold 2m --openclaw-channel whatsapp --openclaw-target "$TARGET"
 
 If the vehicle is delayed, missing, or TfL fails, LondonJourneyCLI returns that state and sends the degraded truth when delivery is configured.
 

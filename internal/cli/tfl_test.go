@@ -160,8 +160,13 @@ func TestTFLNextArrivalQueryReportsAPIErrorWhenCandidateErrorLeavesResultAmbiguo
 	if code != exitcode.Network {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
 	}
-	if !strings.Contains(errb.String(), "check arrivals for Broken Candidate") {
-		t.Fatalf("expected ambiguous candidate error, got %s", errb.String())
+	for _, want := range []string{`"status": "api_error"`, `"statusCode": 502`, "Broken Candidate"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("expected %q in %s", want, out.String())
+		}
+	}
+	if strings.TrimSpace(errb.String()) != "" {
+		t.Fatalf("expected empty stderr for JSON API error, got %s", errb.String())
 	}
 }
 
@@ -355,5 +360,41 @@ func TestTFLWatchArrivalPlainNotificationFailureIsSingleTSVRow(t *testing.T) {
 	}
 	if strings.Contains(fields[4], "\n") || strings.Contains(fields[4], "\t") {
 		t.Fatalf("notification error was not sanitized: %q", fields[4])
+	}
+}
+
+func TestTFLJourneyAmbiguityJSON(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Journey/JourneyResults/1000139/to/Highgate", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMultipleChoices)
+		_, _ = w.Write([]byte(`{"toLocationDisambiguation":{"matchStatus":"list","disambiguationOptions":[{"parameterValue":"1000109","uri":"/journey/journeyresults/se192xe/to/1000109","place":{"commonName":"Highgate (London), Highgate","placeType":"StopPoint","naptanId":"490000109S","icsCode":"1000109","modes":["tube","bus"],"lat":51.5777,"lon":-0.1457},"matchQuality":1000}]},"fromLocationDisambiguation":{"matchStatus":"identified"},"journeyVector":{"from":"SE192XE","to":"Highgate"}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "journey", "--from", "London Bridge", "--to", "Highgate"}, &out, &errb)
+	if code != exitcode.Usage {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	for _, want := range []string{`"status": "ambiguous"`, `"statusCode": 300`, "Highgate (London), Highgate", "Resolve the origin"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("expected %q in %s", want, out.String())
+		}
+	}
+	if strings.TrimSpace(errb.String()) != "" {
+		t.Fatalf("expected empty stderr for JSON ambiguity, got %s", errb.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	code = Run(context.Background(), []string{"tfl", "journey", "--from", "London Bridge", "--to", "Highgate"}, &out, &errb)
+	if code != exitcode.Usage {
+		t.Fatalf("plain code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "disambiguation required") {
+		t.Fatalf("expected plain ambiguity diagnostic, got %s", errb.String())
 	}
 }

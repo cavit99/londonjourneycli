@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -667,6 +668,43 @@ type nextArrivalResult struct {
 	Arrivals     []tfl.Arrival `json:"arrivals"`
 }
 
+type tflErrorResult struct {
+	Status  string        `json:"status"`
+	Message string        `json:"message"`
+	Error   *tfl.APIError `json:"error,omitempty"`
+}
+
+func writeStructuredTfLError(g globals, stdout, stderr io.Writer, err error) (int, bool) {
+	if g.format != output.JSON {
+		return 0, false
+	}
+	var apiErr *tfl.APIError
+	if !errors.As(err, &apiErr) {
+		return 0, false
+	}
+	status := "api_error"
+	message := err.Error()
+	code := exitcode.Network
+	if apiErr.StatusCode == http.StatusMultipleChoices && apiErr.Disambiguation != nil {
+		status = "ambiguous"
+		message = "TfL needs a more specific place. Resolve the origin, destination, or via point to a postcode, station/stop ID, coordinates, or exact address, then retry."
+		code = exitcode.Usage
+	}
+	if writeErr := output.WriteJSON(stdout, tflErrorResult{Status: status, Message: message, Error: apiErr}); writeErr != nil {
+		fmt.Fprintln(stderr, writeErr)
+		return exitcode.Generic, true
+	}
+	return code, true
+}
+
+func tflErrorExitCode(err error) int {
+	var apiErr *tfl.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusMultipleChoices && apiErr.Disambiguation != nil {
+		return exitcode.Usage
+	}
+	return exitcode.Network
+}
+
 func tflNextArrival(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("next-arrival", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -710,8 +748,11 @@ func tflNextArrival(ctx context.Context, g globals, client *tfl.Client, args []s
 		SearchLimit:     *searchLimit,
 	})
 	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, err)
-		return exitcode.Network
+		return tflErrorExitCode(err)
 	}
 	arrivals := found.Arrivals
 	if *limit < len(found.Arrivals) {
@@ -800,8 +841,11 @@ func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []strin
 		LocalOnly:                *localOnly,
 	})
 	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, err)
-		return exitcode.Network
+		return tflErrorExitCode(err)
 	}
 	if g.format == output.JSON {
 		_ = output.WriteJSON(stdout, resp)
