@@ -2,6 +2,7 @@ package tfl
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -52,6 +53,25 @@ func TestRequestErrorsDoNotLeakAppKey(t *testing.T) {
 	msg := err.Error()
 	if strings.Contains(msg, "SECRETKEY123") || strings.Contains(msg, "app_key") {
 		t.Fatalf("request error leaked URL credentials: %s", msg)
+	}
+}
+
+func TestRequestErrorsPreserveCancellationCause(t *testing.T) {
+	c := NewClient("SECRETKEY123")
+	c.BaseURL = "http://127.0.0.1:1"
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := c.Arrivals(ctx, "490000139R")
+	if err == nil {
+		t.Fatal("expected request error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "SECRETKEY123") || strings.Contains(msg, "app_key") {
+		t.Fatalf("request error leaked URL credentials: %s", msg)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected sanitized error to wrap context.Canceled, got %v", err)
 	}
 }
 

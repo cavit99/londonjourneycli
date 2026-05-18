@@ -24,6 +24,7 @@ Useful demo commands:
 What makes it different from broader TfL wrappers:
 
 - Task-shaped commands, not just endpoint exposure.
+- One trip command bundles route summary, Journey Planner fare data, line disruptions, and accessibility flags.
 - Built-in journey comparison/ranking for route choice.
 - Stop-name plus line resolution for arrivals.
 - Location-share nearby-stop lookup.

@@ -288,6 +288,7 @@ func TestTFLCommandUsageEdges(t *testing.T) {
 		{name: "fares mixed station and zone", args: []string{"tfl", "fares", "--from", "A", "--from-zone", "1", "--to-zone", "3"}, code: exitcode.Usage, want: "cannot be combined"},
 		{name: "fares missing zone pair", args: []string{"tfl", "fares", "--from-zone", "1"}, code: exitcode.Usage, want: "required together"},
 		{name: "fares unsupported zones", args: []string{"tfl", "fares", "--from-zone", "2", "--to-zone", "4"}, code: exitcode.NoData, want: "Non-Zone-1 multi-zone"},
+		{name: "fares huge unsupported zone", args: []string{"tfl", "fares", "--from-zone", "1", "--to-zone", "1000000000"}, code: exitcode.NoData, want: "zones 1-6"},
 		{name: "fares unsupported passenger", args: []string{"tfl", "fares", "--from-zone", "1", "--to-zone", "3", "--passenger", "Railcard"}, code: exitcode.NoData, want: "Adult fares only"},
 		{name: "watch missing line", args: []string{"tfl", "watch-arrival", "--stop", "490", "--dry-run"}, code: exitcode.Usage, want: "--line is required"},
 		{name: "watch missing stop and query", args: []string{"tfl", "watch-arrival", "--line", "43", "--dry-run"}, code: exitcode.Usage, want: "provide exactly one"},

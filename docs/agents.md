@@ -21,7 +21,8 @@ Agents should resolve "home", "office", venue names, and vague areas before call
 
 JSON mode structures TfL API errors and request failures. Journey planning can return status "ambiguous" with TfL disambiguation data; non-watch TfL request failures return status "api_error" for HTTP failures or "api_failed" for lower-level network/timeout failures. With --envelope, ok is false for all of these.
 
-Use tfl status and tfl disruptions before giving time-sensitive route advice when delays would change the recommendation.
+Use tfl trip for user-facing route advice when one answer should include route summary, Journey Planner fare data where available, active disruptions on the selected lines, and accessibility flags. Use tfl journey when the caller only needs raw Journey Planner options.
+Use tfl status and tfl disruptions before giving time-sensitive route advice when delays would change the recommendation and you are not already using tfl trip.
 Use tfl compare when the user asks which route is best, easiest, fastest, or least walking. Pass --rank fastest, fewest-changes, least-walking, or balanced, and prefer --json so the agent can read score, reasons, duration, walkingMinutes, interchangeCount, modes, lines, fare, and legs directly.
 Use tfl line-routes when choosing or explaining line direction, termini, or service sections.
 Use tfl arrivals --query when the user gives a stop/station name and the agent needs several upcoming predictions without first running stop-search. Query arrivals default to bus stop search; pass --mode tube, --mode all, etc. for non-bus stops.

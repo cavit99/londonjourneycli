@@ -1,6 +1,6 @@
 # londonjourneycli
 
-A small Go CLI that turns TfL's endpoint-shaped API into task-shaped tools for agents: plan and compare journeys, resolve named stops, read live arrivals, price fares, find nearby stops from shared locations, discover accessible stations, and run one-shot transport checks.
+A small Go CLI that turns TfL's endpoint-shaped API into task-shaped tools for agents: plan trips, compare journeys, resolve named stops, read live arrivals, price fares, find nearby stops from shared locations, discover accessible stations, and run one-shot transport checks.
 
 It also includes a narrow skill manifest runner so an agent can discover, test, and call the transport skill without relying on prose alone.
 
@@ -12,6 +12,7 @@ LondonJourneyCLI packages those workflows into commands that return answer-shape
 
 It is useful when an agent needs to:
 
+- bundle a route summary with fare, disruption, and accessibility context
 - compare and rank TfL journey options without writing scoring glue
 - resolve a stop name plus line into the actual stop with live predictions
 - turn a WhatsApp/OpenClaw location share into nearby stops
@@ -71,6 +72,7 @@ TfL examples:
     londonjourneycli --json tfl line-routes --line victoria
     londonjourneycli --json --output 0.lineStatuses.0.statusSeverityDescription tfl status --line victoria
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
+    londonjourneycli --json tfl trip --from "London Bridge" --to "Paddington" --include-alternatives
     londonjourneycli --json tfl compare --from "London Bridge" --to "Paddington" --rank balanced --include-alternatives
     londonjourneycli tfl journey --from "Westminster" --to "Waterloo" --preference LeastWalking --max-walking-minutes 15
     londonjourneycli --json tfl fare --from-zone 3 --to-zone 1 --period peak --payment contactless
@@ -81,7 +83,8 @@ TfL examples:
 
 For agents:
 
-- Resolve fuzzy places before calling journey: turn "home", "office", venue names, and vague areas into exact addresses, postcodes, coordinates, or TfL IDs.
+- Resolve fuzzy places before calling trip, compare, or journey: turn "home", "office", venue names, and vague areas into exact addresses, postcodes, coordinates, or TfL IDs.
+- Prefer tfl trip for user-facing route advice when fare, disruption, or accessibility context would affect the answer; use tfl journey when raw TfL Journey Planner options are enough.
 - Use tfl compare when the user asks which route is best; JSON returns ranked options with score, reasons, duration, walking minutes, interchange count, modes, lines, fare when present, and legs.
 - If the user shared a WhatsApp/OpenClaw location, pass the coordinates or location context text to nearby-stops with --location.
 - For fare questions, prefer station-pair lookup with date/time when route, peak rules, or National Rail acceptance could matter; use zonal lookup for simple adult PAYG zone questions.
@@ -108,6 +111,8 @@ SKILL.md remains the agent playbook. skill.yaml is the executable contract.
     commands:
       - name: journey
         exec: [londonjourneycli, tfl, journey]
+      - name: trip
+        exec: [londonjourneycli, tfl, trip]
       - name: compare
         exec: [londonjourneycli, tfl, compare]
     tests:

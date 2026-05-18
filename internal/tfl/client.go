@@ -934,5 +934,5 @@ func sanitizeRequestError(err error) error {
 	if !errors.As(err, &urlErr) {
 		return err
 	}
-	return fmt.Errorf("tfl request failed: %s: %v", urlErr.Op, urlErr.Err)
+	return fmt.Errorf("tfl request failed: %s: %w", urlErr.Op, urlErr.Err)
 }

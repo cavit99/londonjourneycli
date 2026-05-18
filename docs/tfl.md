@@ -13,6 +13,15 @@ The default mode set is tube, DLR, Elizabeth line, Overground, and tram. Use --l
 
 Use line-routes when an agent needs line endpoints/directions to explain a service or choose the correct direction filter.
 
+## Trip Bundle
+
+    londonjourneycli --json tfl trip --from "London Bridge" --to "Paddington"
+    londonjourneycli --json tfl trip --from "Oxford Circus" --to "King's Cross" --mode tube --accessibility step-free-to-platform --between-entrances
+
+Use trip for agent-facing route answers. It calls TfL Journey Planner once, summarizes the selected and alternative options, derives fare data from the Journey Planner fare payload when available, checks active disruptions for the selected option's lines, and returns accessibility request flags and notes. It accepts the same journey flags as tfl journey plus --limit for the number of options to summarize.
+
+JSON output is shaped for direct branching: status, message, from, to, selected, journeys, fare, disruptions, and accessibility. A successful journey can still have fare.status "no_data" when TfL omits fare data. If no journeys are returned, status is "no_journey" and the command exits with no-data.
+
 ## Journey Planning
 
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"

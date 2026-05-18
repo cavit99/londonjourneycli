@@ -2,6 +2,7 @@ package output
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -46,6 +47,27 @@ func TestProject(t *testing.T) {
 
 	if got, err := Project(value, ""); err != nil || got == nil {
 		t.Fatalf("empty projection got=%#v err=%v", got, err)
+	}
+}
+
+func TestProjectPreservesLargeInteger(t *testing.T) {
+	got, err := Project(map[string]any{"id": int64(9007199254740993)}, "id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	number, ok := got.(json.Number)
+	if !ok {
+		t.Fatalf("expected json.Number, got %T %[1]v", got)
+	}
+	if number.String() != "9007199254740993" {
+		t.Fatalf("large integer lost precision: %s", number.String())
+	}
+	var b bytes.Buffer
+	if err := WriteJSON(&b, got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(b.String()) != "9007199254740993" {
+		t.Fatalf("projected JSON lost precision: %s", b.String())
 	}
 }
 

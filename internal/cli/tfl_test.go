@@ -374,6 +374,119 @@ func TestTFLAccessibleStationsNearRequiresLiftSortsAfterFiltering(t *testing.T) 
 	}
 }
 
+func TestTFLTripHappyPathIncludesFareDisruptionsAndAccessibility(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Journey/JourneyResults/1000139/to/1000174", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("accessibilityPreference"); got != "StepFreeToPlatform" {
+			t.Fatalf("accessibilityPreference=%q", got)
+		}
+		if got := r.URL.Query().Get("routeBetweenEntrances"); got != "true" {
+			t.Fatalf("routeBetweenEntrances=%q", got)
+		}
+		body := `{"Journeys":[{"StartDateTime":"2026-05-18T09:00:00","ArrivalDateTime":"2026-05-18T09:32:00","Duration":32,"Fare":{"TotalCost":280,"Fares":[{"LowZone":1,"HighZone":1,"Cost":280,"ChargeLevel":"Peak"}]},"Legs":[{"Mode":{"Name":"walking"},"DepartureTime":"2026-05-18T09:00:00","ArrivalTime":"2026-05-18T09:05:00","Duration":5,"DeparturePoint":{"CommonName":"Borough High Street"},"ArrivalPoint":{"CommonName":"London Bridge"},"Instruction":{"Summary":"Walk to London Bridge"}},{"Mode":{"Name":"tube"},"DepartureTime":"2026-05-18T09:06:00","ArrivalTime":"2026-05-18T09:30:00","Duration":24,"DeparturePoint":{"CommonName":"London Bridge"},"ArrivalPoint":{"CommonName":"Paddington"},"RouteOptions":[{"Name":"Jubilee"}]},{"Mode":{"Name":"walking"},"DepartureTime":"2026-05-18T09:30:00","ArrivalTime":"2026-05-18T09:32:00","Duration":2,"DeparturePoint":{"CommonName":"Paddington"},"ArrivalPoint":{"CommonName":"Praed Street"},"Instruction":{"Summary":"Exit station"}}]}]}`
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/Line/jubilee/Status", func(w http.ResponseWriter, r *http.Request) {
+		body := `[{"id":"jubilee","name":"Jubilee","modeName":"tube","lineStatuses":[{"statusSeverity":6,"statusSeverityDescription":"Severe Delays","reason":"Signal failure at Bond Street","disruption":{"category":"RealTime","type":"lineInfo","description":"Signal failure at Bond Street"}}]}]`
+		_, _ = w.Write([]byte(body))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "trip", "--from", "London Bridge", "--to", "Paddington", "--accessibility", "step-free-to-platform", "--between-entrances"}, &out, &errb)
+	if code != exitcode.OK {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	var result tripResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode trip result: %v\n%s", err, out.String())
+	}
+	if result.Status != "ok" || result.Selected == nil || result.Selected.DurationMinutes != 32 {
+		t.Fatalf("unexpected selected trip: %+v", result)
+	}
+	if result.Fare.Status != "ok" || result.Fare.AmountPence != 280 {
+		t.Fatalf("fare not derived from journey data: %+v", result.Fare)
+	}
+	if len(result.Disruptions.Active) != 1 || result.Disruptions.Active[0].LineID != "jubilee" || !strings.Contains(result.Disruptions.Active[0].Description, "Signal failure") {
+		t.Fatalf("disruption not enriched from selected line: %+v", result.Disruptions)
+	}
+	for _, want := range []string{"accessibility_preferences_requested", "step_free_requested", "route_between_entrances_requested", "walking_required"} {
+		if !containsString(result.Accessibility.Flags, want) {
+			t.Fatalf("expected accessibility flag %q in %+v", want, result.Accessibility)
+		}
+	}
+}
+
+func TestTFLTripNoJourneyNoFare(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Journey/JourneyResults/1000139/to/Nowhere", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"Journeys":[]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "trip", "--from", "London Bridge", "--to", "Nowhere"}, &out, &errb)
+	if code != exitcode.NoData {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	var result tripResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode trip result: %v\n%s", err, out.String())
+	}
+	if result.Status != "no_journey" || result.Selected != nil || len(result.Journeys) != 0 {
+		t.Fatalf("expected no journey result, got %+v", result)
+	}
+	if result.Fare.Status != "no_data" || !strings.Contains(result.Fare.Message, "no journey") {
+		t.Fatalf("expected no-data fare, got %+v", result.Fare)
+	}
+	if result.Disruptions.Status != "not_applicable" || len(result.Disruptions.Active) != 0 {
+		t.Fatalf("expected no disruption lookup, got %+v", result.Disruptions)
+	}
+}
+
+func TestTFLTripNoFareStillEnrichesDisruptions(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/Journey/JourneyResults/1000254/to/1000174", func(w http.ResponseWriter, r *http.Request) {
+		body := `{"Journeys":[{"StartDateTime":"2026-05-18T10:00:00","ArrivalDateTime":"2026-05-18T10:18:00","Duration":18,"Legs":[{"Mode":{"Name":"tube"},"DepartureTime":"2026-05-18T10:00:00","ArrivalTime":"2026-05-18T10:18:00","Duration":18,"DeparturePoint":{"CommonName":"Waterloo"},"ArrivalPoint":{"CommonName":"Paddington"},"RouteOptions":[{"Name":"Bakerloo"}]}]}]}`
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/Line/bakerloo/Status", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":"bakerloo","name":"Bakerloo","modeName":"tube","lineStatuses":[{"statusSeverity":10,"statusSeverityDescription":"Good Service"}]}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "trip", "--from", "Waterloo", "--to", "Paddington"}, &out, &errb)
+	if code != exitcode.OK {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	var result tripResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode trip result: %v\n%s", err, out.String())
+	}
+	if result.Fare.Status != "no_data" || result.Fare.AmountPence != 0 {
+		t.Fatalf("expected no fare, got %+v", result.Fare)
+	}
+	if result.Disruptions.Status != "ok" || len(result.Disruptions.Active) != 0 || len(result.Disruptions.Lines) != 1 || result.Disruptions.Lines[0].ID != "bakerloo" {
+		t.Fatalf("expected clean bakerloo disruption enrichment, got %+v", result.Disruptions)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTFLNextArrivalQuerySkipsSearchMatchesWithNoPredictions(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
