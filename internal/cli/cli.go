@@ -625,6 +625,9 @@ func tflStatus(ctx context.Context, g globals, client *tfl.Client, args []string
 	}
 	statuses, err := client.LineStatus(ctx, csvArgs(*line), csvArgs(*mode))
 	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
@@ -674,6 +677,9 @@ func tflDisruptions(ctx context.Context, g globals, client *tfl.Client, args []s
 	}
 	disruptions, err := client.LineDisruptions(ctx, csvArgs(*line), csvArgs(*mode))
 	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
@@ -722,6 +728,9 @@ func tflLineRoutes(ctx context.Context, g globals, client *tfl.Client, args []st
 	}
 	routes, err := client.LineRoutes(ctx, lines)
 	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
@@ -780,6 +789,9 @@ func tflNearbyStops(ctx context.Context, g globals, client *tfl.Client, args []s
 	}
 	stops, err := client.NearbyStops(ctx, tfl.NearbyStopOptions{Lat: *lat, Lon: *lon, Radius: *radius, Modes: csvArgs(*mode), StopTypes: csvArgs(*stopTypes), Limit: *limit})
 	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
@@ -838,6 +850,9 @@ func tflStopInfo(ctx context.Context, g globals, client *tfl.Client, args []stri
 	}
 	info, err := client.StopPoint(ctx, *stop)
 	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
@@ -915,6 +930,9 @@ func tflStopSearch(ctx context.Context, g globals, client *tfl.Client, args []st
 	}
 	resp, err := client.StopSearchWithOptions(ctx, strings.Join(queryParts, " "), tfl.StopSearchOptions{Modes: csvArgs(modes), Lines: csvArgs(lines), MaxResults: maxResults, IncludeHubs: includeHubs})
 	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
@@ -952,6 +970,9 @@ func tflArrivals(ctx context.Context, g globals, client *tfl.Client, args []stri
 	}
 	arrivals, err := client.LineArrivals(ctx, *stop, csvArgs(*line), *direction, *destinationStop)
 	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
@@ -1000,7 +1021,10 @@ func writeStructuredTfLError(g globals, stdout, stderr io.Writer, err error) (in
 	}
 	var apiErr *tfl.APIError
 	if !errors.As(err, &apiErr) {
-		return 0, false
+		if writeCode := writeJSONPreservingPayload(g, stdout, stderr, tflErrorResult{Status: "api_failed", Message: err.Error()}); writeCode != exitcode.OK {
+			return writeCode, true
+		}
+		return exitcode.Network, true
 	}
 	status := "api_error"
 	message := err.Error()

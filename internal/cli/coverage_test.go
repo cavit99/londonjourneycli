@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -254,12 +255,28 @@ func TestStructuredTfLErrorOutput(t *testing.T) {
 		t.Fatalf("ambiguous output code=%d ok=%t out=%q err=%q", code, ok, out.String(), errb.String())
 	}
 	out.Reset()
+	errb.Reset()
+	code, ok = writeStructuredTfLError(globals{format: output.JSON}, &out, &errb, errors.New("dial failed"))
+	if !ok || code != exitcode.Network || !strings.Contains(out.String(), "\"status\": \"api_failed\"") || strings.TrimSpace(errb.String()) != "" {
+		t.Fatalf("request failure output code=%d ok=%t out=%q err=%q", code, ok, out.String(), errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	code, ok = writeStructuredTfLError(globals{format: output.JSON, envelope: true}, &out, &errb, errors.New("dial failed"))
+	if !ok || code != exitcode.Network || !strings.Contains(out.String(), "\"ok\": false") || !strings.Contains(out.String(), "\"status\": \"api_failed\"") || strings.TrimSpace(errb.String()) != "" {
+		t.Fatalf("enveloped request failure output code=%d ok=%t out=%q err=%q", code, ok, out.String(), errb.String())
+	}
+	out.Reset()
 	code, ok = writeStructuredTfLError(globals{format: output.JSON}, &out, &errb, &tfl.APIError{StatusCode: 500, Message: "bad gateway"})
 	if !ok || code != exitcode.Network || !strings.Contains(out.String(), "\"status\": \"api_error\"") {
 		t.Fatalf("api output code=%d ok=%t out=%q", code, ok, out.String())
 	}
 	if _, ok := writeStructuredTfLError(globals{format: output.Human}, &out, &errb, ambiguous); ok {
 		t.Fatal("human format should not write structured errors")
+	}
+	errb.Reset()
+	if _, ok := writeStructuredTfLError(globals{format: output.Human}, &out, &errb, errors.New("dial failed")); ok {
+		t.Fatal("human request failures should stay stderr-only at the call site")
 	}
 	if code := tflErrorExitCode(ambiguous); code != exitcode.Usage {
 		t.Fatalf("ambiguous exit=%d", code)
