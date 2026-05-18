@@ -233,7 +233,7 @@ func (c *Client) LineArrivals(ctx context.Context, stopID string, lines []string
 	if err != nil || len(arrivals) > 0 {
 		return arrivals, err
 	}
-	children, err := c.childStopIDs(ctx, stopID)
+	children, err := c.descendantStopIDs(ctx, stopID)
 	if err != nil || len(children) == 0 {
 		return arrivals, nil
 	}
@@ -249,6 +249,7 @@ func (c *Client) LineArrivals(ctx context.Context, stopID string, lines []string
 		}
 		combined = append(combined, childArrivals...)
 	}
+	combined = dedupeArrivals(combined)
 	sort.Slice(combined, func(i, j int) bool { return combined[i].TimeToStation < combined[j].TimeToStation })
 	return combined, nil
 }
@@ -347,18 +348,99 @@ func (c *Client) getArrivals(ctx context.Context, endpoint string) ([]Arrival, e
 	return arrivals, nil
 }
 
-func (c *Client) childStopIDs(ctx context.Context, stopID string) ([]string, error) {
+func dedupeArrivals(arrivals []Arrival) []Arrival {
+	if len(arrivals) < 2 {
+		return arrivals
+	}
+	seen := make(map[string]bool, len(arrivals))
+	out := make([]Arrival, 0, len(arrivals))
+	for _, arrival := range arrivals {
+		key := arrivalKey(arrival)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, arrival)
+	}
+	return out
+}
+
+func arrivalKey(a Arrival) string {
+	return strings.Join([]string{
+		a.VehicleID,
+		a.LineName,
+		a.DestinationName,
+		a.StationName,
+		a.PlatformName,
+		a.ExpectedArrival.Format(time.RFC3339Nano),
+	}, "\x00")
+}
+
+func (c *Client) descendantStopIDs(ctx context.Context, stopID string) ([]string, error) {
 	stop, err := c.StopPoint(ctx, stopID)
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(stop.Children))
-	for _, child := range stop.Children {
-		if strings.TrimSpace(child.ID) != "" {
-			ids = append(ids, child.ID)
+	children := stop.Children
+	if strings.TrimSpace(stop.ID) != strings.TrimSpace(stopID) {
+		if matched := findStopPointChild(stop.Children, stopID); matched != nil {
+			children = matched.Children
+			if len(children) == 0 {
+				if matchedStop, err := c.StopPoint(ctx, matched.ID); err == nil {
+					children = matchedStop.Children
+				}
+			}
 		}
 	}
+	visited := map[string]bool{}
+	var ids []string
+	var collect func([]StopPoint, int)
+	collect = func(children []StopPoint, depth int) {
+		// TfL stop groups are shallow in practice; this cap prevents malformed cycles from fanning out.
+		if depth > 6 {
+			return
+		}
+		for _, child := range children {
+			childID := strings.TrimSpace(child.ID)
+			if childID != "" && !visited[childID] {
+				visited[childID] = true
+				ids = append(ids, childID)
+			}
+			if len(child.Children) > 0 {
+				collect(child.Children, depth+1)
+				continue
+			}
+			if childID != "" && isLikelyGroupedStopID(childID) {
+				childStop, err := c.StopPoint(ctx, childID)
+				if err == nil {
+					collect(childStop.Children, depth+1)
+				}
+			}
+		}
+	}
+	collect(children, 0)
 	return ids, nil
+}
+
+func findStopPointChild(children []StopPoint, id string) *StopPoint {
+	id = strings.TrimSpace(id)
+	for i := range children {
+		childID := strings.TrimSpace(children[i].ID)
+		if childID == id {
+			return &children[i]
+		}
+		if found := findStopPointChild(children[i].Children, id); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func isLikelyGroupedStopID(id string) bool {
+	return strings.HasPrefix(id, "490G") ||
+		strings.HasPrefix(id, "HUB") ||
+		strings.HasPrefix(id, "910G") ||
+		strings.HasPrefix(id, "940G")
 }
 
 func setCSVParam(values url.Values, name string, raw []string) {

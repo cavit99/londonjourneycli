@@ -54,6 +54,32 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte("null"))
 	})
+	mux.HandleFunc("/StopPoint/490GHUB", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"490GHUB","commonName":"Nested Hub","children":[{"id":"490GGROUP","commonName":"Nested Group","modes":["bus"]}]}`))
+	})
+	mux.HandleFunc("/StopPoint/490GGROUP", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"490GGROUP","commonName":"Nested Group","children":[{"id":"490LEAF","commonName":"Leaf Stop","indicator":"Stop L","stopLetter":"L","modes":["bus"]}]}`))
+	})
+	mux.HandleFunc("/StopPoint/490LEAF", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"490LEAF","commonName":"Leaf Stop","children":[]}`))
+	})
+	mux.HandleFunc("/Line/149/Arrivals/490GHUB", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	})
+	mux.HandleFunc("/Line/149/Arrivals/490GGROUP", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body := `[{"LineName":"149","DestinationName":"Edmonton Green","StationName":"Leaf Stop","PlatformName":"L","Towards":"Liverpool Street","ExpectedArrival":"2026-05-18T01:05:00Z","TimeToStation":300,"VehicleID":"149"}]`
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/Line/149/Arrivals/490LEAF", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body := `[{"LineName":"149","DestinationName":"Edmonton Green","StationName":"Leaf Stop","PlatformName":"L","Towards":"Liverpool Street","ExpectedArrival":"2026-05-18T01:05:00Z","TimeToStation":300,"VehicleID":"149"}]`
+		_, _ = w.Write([]byte(body))
+	})
 	mux.HandleFunc("/StopPoint/490000139R/Arrivals", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		body := "[{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:03:00Z\",\"TimeToStation\":180,\"VehicleID\":\"a\"},{\"LineName\":\"43\",\"DestinationName\":\"Friern Barnet\",\"StationName\":\"London Bridge Bus Station\",\"PlatformName\":\"D\",\"Towards\":\"Old Street\",\"ExpectedArrival\":\"2026-05-18T01:01:00Z\",\"TimeToStation\":60,\"VehicleID\":\"b\"}]"
@@ -109,6 +135,13 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	}
 	if emptyFallbackArrivals == nil || len(emptyFallbackArrivals) != 0 {
 		t.Fatalf("expected non-nil empty child fallback arrivals, got %+v", emptyFallbackArrivals)
+	}
+	nestedFallbackArrivals, err := c.LineArrivals(context.Background(), "490GHUB", []string{"149"}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nestedFallbackArrivals) != 1 || nestedFallbackArrivals[0].PlatformName != "L" {
+		t.Fatalf("unexpected nested child fallback arrivals: %+v", nestedFallbackArrivals)
 	}
 
 	journey, err := c.Journey(context.Background(), "London Bridge", "Paddington", JourneyOptions{})
