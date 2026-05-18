@@ -1,6 +1,6 @@
 # londonjourneycli
 
-A small Go CLI for London journey planning, live TfL arrivals, line status, disruptions, and agent-safe transport alerts.
+A small Go CLI for London journey planning, live TfL arrivals, line status, disruptions, fare lookup, nearby stop search, accessible station discovery, and agent-safe transport alerts.
 
 It also includes a narrow skill manifest runner so an agent can discover, test, and call the transport skill without relying on prose alone.
 
@@ -75,7 +75,14 @@ TfL examples:
     londonjourneycli --json tfl arrivals --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
 
-For agents, resolve fuzzy places before calling journey: turn "home", "office", venue names, and vague areas into exact addresses, postcodes, coordinates, or TfL IDs. If the user shared a WhatsApp/OpenClaw location, pass the coordinates or location context text to nearby-stops with --location. For accessible route planning, prefer journey's native --accessibility preferences. For nearby station discovery, use accessible-stations; it resolves --near through StopSearch and returns station candidates sorted by distance with accessStatus, stepFreeAccess, liftPresent, lifts, and accessViaLift fields. If TfL still returns JSON status "ambiguous", use the returned disambiguation options to retry or ask one clarification.
+For agents:
+
+- Resolve fuzzy places before calling journey: turn "home", "office", venue names, and vague areas into exact addresses, postcodes, coordinates, or TfL IDs.
+- If the user shared a WhatsApp/OpenClaw location, pass the coordinates or location context text to nearby-stops with --location.
+- For fare questions, prefer station-pair lookup with date/time when route, peak rules, or National Rail acceptance could matter; use zonal lookup for simple adult PAYG zone questions.
+- For accessible route planning, prefer journey's native --accessibility preferences with --between-entrances when station access matters.
+- For accessible nearby-station discovery, use accessible-stations; it resolves --near through StopSearch, queries nearby station stop points with only Accessibility and Facility property categories, and returns candidates sorted by distance with accessStatus, stepFreeAccess, liftPresent, lifts, and accessViaLift fields.
+- If TfL returns JSON status "ambiguous", use the returned disambiguation options to retry or ask one clarification.
 
 ## Skill Manifests
 
@@ -177,4 +184,4 @@ For a concise public summary and demo commands, see [docs/share.md](docs/share.m
 
 ## Scope
 
-LondonJourneyCLI stays intentionally narrow: a solid registry/runner plus a real TfL module for London journey planning, live arrivals, nearby stops, line health, and visible transport alerts. More providers should earn their way in through manifests and tests, not by expanding the core until it becomes mush.
+LondonJourneyCLI stays intentionally narrow: a solid registry/runner plus a real TfL module for London journey planning, live arrivals, nearby stops, fares, accessibility lookups, line health, and visible transport alerts. More providers should earn their way in through manifests and tests, not by expanding the core until it becomes mush.

@@ -1,6 +1,6 @@
 # TfL
 
-LondonJourneyCLI includes a small TfL client for London journey planning and live arrivals.
+LondonJourneyCLI includes a small TfL client for London journey planning, fares, line health, stop search, accessibility lookup, and live arrivals.
 
 ## Line Status and Disruptions
 
@@ -56,7 +56,7 @@ Use stop-info when stop-search returns a parent stop group and you need the conc
 
 Use nearby-stops when an agent has coordinates from a resolved address/current location and needs candidate stop IDs around that point. It calls TfL StopPoint with lat, lon, radius, modes, and stopTypes, then normalizes missing IDs from naptanId, sorts by TfL distance, and applies the limit. Defaults are bus stops, 500m radius, and 10 results. --location accepts "lat,lon", "lat lon", geo: URIs, Apple/Google map links that contain coordinates, and OpenClaw/WhatsApp location text such as "📍 51.505000, -0.087000" or LocationLat/LocationLon. Short map links that hide coordinates still need to be resolved before calling the CLI.
 
-Use journey --accessibility for accessible route planning; it maps to TfL Journey Planner's native accessibilityPreference values and can be paired with --between-entrances for station entrance/platform routing. Use accessible-stations for nearby station discovery around a named station/place or coordinates. Defaults cover tube, DLR, Elizabeth line, Overground, National Rail, and tram station-like stop types, with a 1200m radius and 10 results. --near is resolved through StopSearch; --lat/--lon and --location use the same coordinate parsing as nearby-stops. The command requests only TfL's Accessibility and Facility property categories. JSON output includes resolvedNear, radius, requireStepFree, requireLift, and stations[] sorted by distance with accessStatus, stepFreeAccess, liftPresent, lifts, accessViaLift, limitedCapacityLift, and specific entrance fields. Use --require-step-free for confirmed AccessViaLift=true; use --require-lift for broader lift-present candidates.
+Use journey --accessibility for accessible route planning; it maps to TfL Journey Planner's native accessibilityPreference values and can be paired with --between-entrances for station entrance/platform routing. Use accessible-stations for nearby station discovery around a named station/place or coordinates. Defaults cover tube, DLR, Elizabeth line, Overground, National Rail, and tram station-like stop types, with a 1200m radius and 10 results. --near is resolved through StopSearch; --lat/--lon and --location use the same coordinate parsing as nearby-stops. The command requests only TfL's Accessibility and Facility property categories, avoiding the heavier all-properties stop payload while still preserving the useful lift and access fields. JSON output includes resolvedNear, radius, requireStepFree, requireLift, and stations[] sorted by distance with accessStatus, stepFreeAccess, liftPresent, lifts, accessViaLift, limitedCapacityLift, and specific entrance fields. Use --require-step-free for confirmed AccessViaLift=true; use --require-lift for broader lift-present candidates.
 
 ## Live Arrivals
 

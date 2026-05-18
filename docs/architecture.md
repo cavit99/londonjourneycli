@@ -13,7 +13,7 @@ The agent decides whether a skill applies, interprets user context, and writes h
 - cmd/londonjourneycli: process entry point.
 - internal/cli: global flag parsing, command dispatch, and human output.
 - internal/skill: skill discovery, frontmatter parsing, manifest parsing, linting, doctor checks, and manifest command lookup.
-- internal/tfl: TfL API client, known stop aliases, arrival filtering, journey planning.
+- internal/tfl: TfL API client, known stop aliases, arrival filtering, journey planning, fares, nearby stop lookup, and accessibility metadata parsing.
 - internal/notify: delivery adapters. Today this is OpenClaw message send.
 - internal/output: stable JSON and plain row helpers.
 - internal/exitcode: stable exit-code constants.
@@ -33,7 +33,7 @@ TfL commands:
 1. Build a TfL client from TFL_APP_KEY and optional TFL_BASE_URL.
 2. Resolve known aliases for common stations.
 3. Query TfL with a bounded HTTP timeout.
-4. Sort/filter where appropriate.
+4. Sort/filter where appropriate, keeping TfL's own journey, fare, and accessibility semantics intact.
 5. Emit human, plain, or JSON output.
 
 Time-critical watch commands:

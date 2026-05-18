@@ -31,17 +31,17 @@ TfL:
 - londonjourneycli tfl status [--line line-ids] [--mode modes]
 - londonjourneycli tfl disruptions [--line line-ids] [--mode modes]
 - londonjourneycli tfl line-routes --line line-ids
-- londonjourneycli tfl nearby-stops --lat latitude --lon longitude [--radius metres] [--mode modes] [--stop-type stopTypes] [--limit N]
+- londonjourneycli tfl nearby-stops (--lat latitude --lon longitude|--location text) [--radius metres] [--mode modes] [--stop-type stopTypes] [--limit N]
 - londonjourneycli tfl accessible-stations (--near query|--lat latitude --lon longitude|--location text) [--mode modes|all] [--radius metres] [--stop-type stopTypes] [--require-step-free] [--require-lift] [--limit N]
 - londonjourneycli tfl stop-search <query> [--mode modes] [--line lines] [--max-results N] [--include-hubs] [--limit N]
 - londonjourneycli tfl stop-info --stop <id>
-- londonjourneycli tfl arrivals --stop <id> [--line N] [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--limit N]
+- londonjourneycli tfl arrivals (--stop <id>|--query <stop name>) [--line N] [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--mode bus|all|modes] [--search-limit N] [--limit N]
 - londonjourneycli tfl next-arrival (--stop <id>|--query <stop name>) --line <line> [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--mode bus|all|modes] [--search-limit N] [--limit N]
-- londonjourneycli tfl journey --from <origin> --to <destination> [--date YYYYMMDD] [--time HHmm] [--arriving] [--via point] [--preference LeastTime|LeastInterchange|LeastWalking] [--mode modes] [--accessibility prefs] [--max-walking-minutes N] [--walking-speed Slow|Average|Fast] [--real-time]
-- londonjourneycli tfl fare (--from <station> --to <station> | --from-zone N --to-zone N) [--date YYYYMMDD] [--time HHmm] [--period peak|off-peak|anytime] [--payment contactless|oyster|cash] [--mode modes]
-- londonjourneycli tfl watch-arrival (--stop <id>|--query <stop name>) --line <line> [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--mode bus|all|modes] [--search-limit N] [--threshold 2m] [--openclaw-channel whatsapp --openclaw-target <target>]
+- londonjourneycli tfl journey --from <origin> --to <destination> [--date YYYYMMDD] [--time HHmm] [--arriving] [--via point] [--preference LeastTime|LeastInterchange|LeastWalking] [--mode modes] [--accessibility prefs] [--max-walking-minutes N] [--max-transfer-minutes N] [--walking-speed Slow|Average|Fast] [--include-alternatives] [--alternative-walking] [--alternative-cycle] [--cycle-preference pref] [--real-time] [--between-entrances] [--local-only]
+- londonjourneycli tfl fare|fares (--from <station> --to <station> [--from-id id] [--to-id id] | --from-zone N --to-zone N) [--date YYYYMMDD] [--time HHmm] [--period peak|off-peak|anytime] [--payment contactless|oyster|cash] [--passenger Adult] [--mode modes]
+- londonjourneycli tfl watch-arrival (--stop <id>|--query <stop name>) --line <line> [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--mode bus|all|modes] [--search-limit N] [--threshold 2m] [--openclaw-channel whatsapp --openclaw-target <target>] [--dry-run]
 
-watch-arrival requires --threshold > 0. In --no-input mode, it also requires complete OpenClaw delivery flags or --dry-run.
+watch-arrival requires --threshold > 0. In --no-input mode, it also requires complete OpenClaw delivery flags or --dry-run. With delivery configured, due, delayed, no_data, stop_not_found, and api_failed are all visible terminal states.
 
 In JSON mode, journey ambiguity from TfL is structured as status "ambiguous" with error.statusCode 300 and error.disambiguation candidate options. Agents should resolve and retry rather than scraping stderr.
 
