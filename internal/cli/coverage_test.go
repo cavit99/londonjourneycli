@@ -51,6 +51,7 @@ func TestRunMetaUsageAndGlobalParsing(t *testing.T) {
 		{name: "missing skills dir", args: []string{"--skills-dir"}, code: exitcode.Usage, want: "--skills-dir requires a value"},
 		{name: "missing output", args: []string{"--output"}, code: exitcode.Usage, want: "--output requires a value"},
 		{name: "output without json", args: []string{"--output=status", "version"}, code: exitcode.Usage, want: "--output requires --json"},
+		{name: "envelope without json", args: []string{"--envelope", "version"}, code: exitcode.Usage, want: "--envelope requires --json"},
 		{name: "missing timeout", args: []string{"--timeout"}, code: exitcode.Usage, want: "--timeout requires a duration"},
 		{name: "bad timeout", args: []string{"--timeout=not-a-duration", "list"}, code: exitcode.Usage, want: "invalid duration"},
 		{name: "tfl usage", args: []string{"tfl"}, code: exitcode.Usage, want: "usage: londonjourneycli tfl"},
@@ -88,16 +89,20 @@ func TestSkillCommandFormatsAndFailurePaths(t *testing.T) {
 		{name: "search usage", args: []string{"--skills-dir", root, "search"}, code: exitcode.Usage, want: "usage: londonjourneycli search"},
 		{name: "show plain", args: []string{"--skills-dir", root, "--plain", "show", "demo"}, code: exitcode.OK, want: "transport\ttrue"},
 		{name: "show json", args: []string{"--skills-dir", root, "--json", "show", "demo"}, code: exitcode.OK, want: "\"ownerDomain\": \"transport\""},
+		{name: "show json envelope", args: []string{"--skills-dir", root, "--json", "--envelope", "show", "demo"}, code: exitcode.OK, want: "\"schemaVersion\": \"1.0\""},
+		{name: "show json envelope command", args: []string{"--skills-dir", root, "--json", "--envelope", "show", "demo"}, code: exitcode.OK, want: "\"command\": ["},
 		{name: "show usage", args: []string{"--skills-dir", root, "show"}, code: exitcode.Usage, want: "usage: londonjourneycli show"},
 		{name: "show not found", args: []string{"--skills-dir", root, "show", "missing"}, code: exitcode.NoData, want: "skill not found"},
 		{name: "lint json", args: []string{"--skills-dir", root, "--json", "lint"}, code: exitcode.OK, want: "missing description"},
 		{name: "doctor json missing env", args: []string{"--skills-dir", root, "--json", "doctor", "demo"}, code: exitcode.Config, want: "LONDONJOURNEYCLI_TEST_MISSING_ENV"},
+		{name: "doctor envelope missing env", args: []string{"--skills-dir", root, "--json", "--envelope", "doctor", "demo"}, code: exitcode.Config, want: "\"ok\": false"},
 		{name: "doctor no manifest", args: []string{"--skills-dir", root, "doctor", "plain"}, code: exitcode.OK, want: "optional manifest not present"},
 		{name: "doctor not found", args: []string{"--skills-dir", root, "doctor", "missing"}, code: exitcode.NoData, want: "skill not found"},
 		{name: "run missing command", args: []string{"--skills-dir", root, "run", "demo", "missing"}, code: exitcode.NoData, want: "command not found"},
 		{name: "run missing manifest", args: []string{"--skills-dir", root, "run", "plain", "x"}, code: exitcode.NoData, want: "skill or manifest not found"},
 		{name: "run bad timeout", args: []string{"--skills-dir", root, "run", "demo", "bad-timeout"}, code: exitcode.Config, want: "invalid timeout"},
 		{name: "test json failure", args: []string{"--skills-dir", root, "--json", "test", "demo"}, code: exitcode.Generic, want: "\"childExitCode\": 7"},
+		{name: "test envelope failure", args: []string{"--skills-dir", root, "--json", "--envelope", "test", "demo"}, code: exitcode.Generic, want: "\"ok\": false"},
 		{name: "test usage", args: []string{"--skills-dir", root, "test"}, code: exitcode.Usage, want: "usage: londonjourneycli test"},
 	}
 	for _, tc := range cases {
@@ -152,6 +157,10 @@ func TestCLIFormattingHelpers(t *testing.T) {
 	}
 	if got := roundMinutes(89); got != 1 {
 		t.Fatalf("round minutes=%d", got)
+	}
+	redacted := redactCommand([]string{"tfl", "watch-arrival", "--openclaw-target", "+15555550123", "-openclaw-target=+15555550124", "--gateway-token=secret"})
+	if strings.Contains(strings.Join(redacted, " "), "+15555550123") || strings.Contains(strings.Join(redacted, " "), "+15555550124") || strings.Contains(strings.Join(redacted, " "), "secret") {
+		t.Fatalf("command was not redacted: %v", redacted)
 	}
 	if got := hhmm("not-an-iso-time"); got != "not-an-iso-time" {
 		t.Fatalf("hhmm fallback=%q", got)

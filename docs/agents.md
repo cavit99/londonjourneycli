@@ -6,6 +6,7 @@ LondonJourneyCLI is designed to be driven by agents, cron jobs, and scripts.
 
 - Pass --json when parsing output.
 - Use --output <path> with --json when you only need one stable field.
+- Use --envelope with --json when the caller wants command metadata and an ok/data wrapper; ok mirrors exit-code success.
 - Pass --no-input in unattended contexts.
 - Pass --skills-dir or set LONDONJOURNEYCLI_SKILLS_DIR; do not rely on private machine paths.
 - Branch on exit code, not stderr text.

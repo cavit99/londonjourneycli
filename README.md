@@ -101,6 +101,7 @@ Commands and tests are argv arrays, not shell strings. That is deliberate: no qu
 - stderr is diagnostics.
 - --json is stable and intended for agents.
 - --output <path> projects JSON output by dot path; pass it before the command, for example --json --output 0.name.
+- --envelope wraps JSON as {ok,schemaVersion,command,requestedAt,data}; ok mirrors whether the command exits 0.
 - --plain is tab-separated and scriptable for LondonJourneyCLI-owned output.
 - --no-input declares unattended use and exports LONDONJOURNEYCLI_NO_INPUT=1 to manifest commands.
 - command execution receives no interactive stdin by default.

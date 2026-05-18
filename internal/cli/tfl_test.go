@@ -53,6 +53,7 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		{name: "status", args: []string{"--json", "tfl", "status"}, want: "Good Service", code: exitcode.OK},
 		{name: "status plain", args: []string{"--plain", "tfl", "status"}, want: "victoria\tVictoria\ttube\t10\tGood Service", code: exitcode.OK},
 		{name: "status output projection", args: []string{"--json", "--output", "0.lineStatuses.0.statusSeverityDescription", "tfl", "status"}, want: "\"Good Service\"", code: exitcode.OK},
+		{name: "status output envelope", args: []string{"--json", "--envelope", "--output", "0.lineStatuses.0.statusSeverityDescription", "tfl", "status"}, want: "\"ok\": true", code: exitcode.OK},
 		{name: "status output missing path", args: []string{"--json", "--output", "0.nope", "tfl", "status"}, want: "output path", code: exitcode.NoData},
 		{name: "status line", args: []string{"--json", "tfl", "status", "--line", "victoria"}, want: "Severe Delays", code: exitcode.OK},
 		{name: "disruptions", args: []string{"--plain", "tfl", "disruptions", "--line", "victoria"}, want: "victoria\tVictoria\tRealTime\tlineInfo\tMinor platform crowding", code: exitcode.OK},
@@ -311,7 +312,7 @@ func TestTFLWatchArrivalReportsNotificationFailure(t *testing.T) {
 
 			var out, errb bytes.Buffer
 			code := Run(context.Background(), []string{
-				"--json", "tfl", "watch-arrival",
+				"--json", "--envelope", "tfl", "watch-arrival",
 				"--stop", "490000139R",
 				"--line", "43",
 				"--openclaw-channel", "whatsapp",
@@ -320,7 +321,7 @@ func TestTFLWatchArrivalReportsNotificationFailure(t *testing.T) {
 			if code != exitcode.Generic {
 				t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
 			}
-			if !strings.Contains(out.String(), "\"status\": \""+tc.status+"\"") || !strings.Contains(out.String(), "\"notificationOk\": false") || !strings.Contains(out.String(), "\"notificationError\":") {
+			if !strings.Contains(out.String(), "\"ok\": false") || !strings.Contains(out.String(), "\"status\": \""+tc.status+"\"") || !strings.Contains(out.String(), "\"notificationOk\": false") || !strings.Contains(out.String(), "\"notificationError\":") {
 				t.Fatalf("expected failed notification result, got %s", out.String())
 			}
 			if !strings.Contains(errb.String(), "openclaw message send") {
@@ -411,6 +412,15 @@ func TestTFLJourneyAmbiguityJSON(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"status": "ambiguous"`) || strings.TrimSpace(errb.String()) != "" {
 		t.Fatalf("expected full structured ambiguity despite projection miss, stdout=%s stderr=%s", out.String(), errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	code = Run(context.Background(), []string{"--json", "--envelope", "--output", "journeys.0.duration", "tfl", "journey", "--from", "London Bridge", "--to", "Highgate"}, &out, &errb)
+	if code != exitcode.Usage {
+		t.Fatalf("enveloped output ambiguity code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), `"ok": false`) || !strings.Contains(out.String(), `"status": "ambiguous"`) {
+		t.Fatalf("expected false envelope with full structured ambiguity, stdout=%s", out.String())
 	}
 	out.Reset()
 	errb.Reset()

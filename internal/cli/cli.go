@@ -26,6 +26,8 @@ const version = "0.2.0"
 
 type globals struct {
 	format     output.Format
+	envelope   bool
+	command    []string
 	outputPath string
 	skillsDir  string
 	timeout    time.Duration
@@ -43,6 +45,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "--output requires --json")
 		return exitcode.Usage
 	}
+	if g.envelope && g.format != output.JSON {
+		fmt.Fprintln(stderr, "--envelope requires --json")
+		return exitcode.Usage
+	}
 	if g.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, g.timeout)
@@ -52,6 +58,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		printHelp(stdout)
 		return exitcode.OK
 	}
+	g.command = redactCommand(rest)
 	switch rest[0] {
 	case "version":
 		fmt.Fprintln(stdout, version)
@@ -87,6 +94,8 @@ func parseGlobals(args []string) (globals, []string, error) {
 			return g, args[i+1:], nil
 		case "--json":
 			g.format = output.JSON
+		case "--envelope":
+			g.envelope = true
 		case "--plain":
 			g.format = output.Plain
 		case "--no-input":
@@ -138,6 +147,35 @@ func parseGlobals(args []string) (globals, []string, error) {
 	return g, nil, nil
 }
 
+func redactCommand(args []string) []string {
+	redacted := append([]string(nil), args...)
+	for i := 0; i < len(redacted); i++ {
+		name, inlineValue, hasInlineValue := splitFlag(redacted[i])
+		switch name {
+		case "openclaw-target", "gateway-token":
+			if hasInlineValue {
+				redacted[i] = inlineValue + "[redacted]"
+				continue
+			}
+			if i+1 < len(redacted) {
+				redacted[i+1] = "[redacted]"
+			}
+		}
+	}
+	return redacted
+}
+
+func splitFlag(arg string) (name, prefix string, hasValue bool) {
+	trimmed := strings.TrimLeft(arg, "-")
+	if trimmed == arg || trimmed == "" {
+		return "", "", false
+	}
+	if before, _, ok := strings.Cut(trimmed, "="); ok {
+		return before, arg[:len(arg)-len(trimmed)] + before + "=", true
+	}
+	return trimmed, "", false
+}
+
 func skillRoots(g globals) []string {
 	if g.skillsDir != "" {
 		return []string{g.skillsDir}
@@ -164,19 +202,19 @@ func discover(g globals) ([]skill.Skill, error) {
 }
 
 func writeJSON(g globals, stdout, stderr io.Writer, value any) int {
-	return writeJSONWithProjection(g, stdout, stderr, value, false)
+	return writeJSONWithOK(g, stdout, stderr, value, true, false)
 }
 
 func writeJSONPreservingPayload(g globals, stdout, stderr io.Writer, value any) int {
-	return writeJSONWithProjection(g, stdout, stderr, value, true)
+	return writeJSONWithOK(g, stdout, stderr, value, false, true)
 }
 
-func writeJSONWithProjection(g globals, stdout, stderr io.Writer, value any, preserveOnProjectionError bool) int {
+func writeJSONWithOK(g globals, stdout, stderr io.Writer, value any, ok bool, preserveOnProjectionError bool) int {
 	if g.outputPath != "" {
 		projected, err := output.Project(value, g.outputPath)
 		if err != nil {
 			if preserveOnProjectionError {
-				if err := output.WriteJSON(stdout, value); err != nil {
+				if err := output.WriteJSON(stdout, envelopeJSON(g, value, ok)); err != nil {
 					fmt.Fprintln(stderr, err)
 					return exitcode.Generic
 				}
@@ -187,11 +225,24 @@ func writeJSONWithProjection(g globals, stdout, stderr io.Writer, value any, pre
 		}
 		value = projected
 	}
-	if err := output.WriteJSON(stdout, value); err != nil {
+	if err := output.WriteJSON(stdout, envelopeJSON(g, value, ok)); err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitcode.Generic
 	}
 	return exitcode.OK
+}
+
+func envelopeJSON(g globals, value any, ok bool) any {
+	if !g.envelope {
+		return value
+	}
+	return map[string]any{
+		"ok":            ok,
+		"schemaVersion": "1.0",
+		"command":       g.command,
+		"requestedAt":   time.Now().UTC().Format(time.RFC3339),
+		"data":          value,
+	}
 }
 
 func cmdList(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
@@ -297,8 +348,15 @@ func cmdLint(ctx context.Context, g globals, args []string, stdout, stderr io.Wr
 		return exitcode.Generic
 	}
 	issues := skill.Lint(skills)
+	status := exitcode.OK
+	for _, issue := range issues {
+		if issue.Severity == "error" {
+			status = exitcode.Generic
+			break
+		}
+	}
 	if g.format == output.JSON {
-		if code := writeJSON(g, stdout, stderr, issues); code != exitcode.OK {
+		if code := writeJSONWithOK(g, stdout, stderr, issues, status == exitcode.OK, false); code != exitcode.OK {
 			return code
 		}
 	} else if g.format == output.Plain {
@@ -314,12 +372,7 @@ func cmdLint(ctx context.Context, g globals, args []string, stdout, stderr io.Wr
 			fmt.Fprintf(stdout, "%s\t%s\t%s\n", issue.Severity, issue.Skill, issue.Message)
 		}
 	}
-	for _, issue := range issues {
-		if issue.Severity == "error" {
-			return exitcode.Generic
-		}
-	}
-	return exitcode.OK
+	return status
 }
 
 func cmdDoctor(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
@@ -338,25 +391,27 @@ func cmdDoctor(ctx context.Context, g globals, args []string, stdout, stderr io.
 		return exitcode.NoData
 	}
 	checks := skill.Doctor(s)
+	status := exitcode.OK
+	for _, c := range checks {
+		if !c.OK {
+			status = exitcode.Config
+			break
+		}
+	}
 	if g.format == output.JSON {
-		if code := writeJSON(g, stdout, stderr, checks); code != exitcode.OK {
+		if code := writeJSONWithOK(g, stdout, stderr, checks, status == exitcode.OK, false); code != exitcode.OK {
 			return code
 		}
 	} else {
 		for _, c := range checks {
-			status := "ok"
+			checkStatus := "ok"
 			if !c.OK {
-				status = "fail"
+				checkStatus = "fail"
 			}
-			fmt.Fprintf(stdout, "%s\t%s\t%s\n", status, c.Name, c.Message)
+			fmt.Fprintf(stdout, "%s\t%s\t%s\n", checkStatus, c.Name, c.Message)
 		}
 	}
-	for _, c := range checks {
-		if !c.OK {
-			return exitcode.Config
-		}
-	}
-	return exitcode.OK
+	return status
 }
 
 func cmdRun(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
@@ -437,7 +492,7 @@ func cmdTest(ctx context.Context, g globals, args []string, stdout, stderr io.Wr
 			_ = output.WritePlainRows(stdout, rows)
 			return status
 		}
-		if code := writeJSON(g, stdout, stderr, results); code != exitcode.OK {
+		if code := writeJSONWithOK(g, stdout, stderr, results, status == exitcode.OK, false); code != exitcode.OK {
 			return code
 		}
 		return status
@@ -1280,10 +1335,7 @@ func disruptionText(d tfl.Disruption) string {
 
 func writeNextArrivalResult(g globals, stdout, stderr io.Writer, result nextArrivalResult) int {
 	if g.format == output.JSON {
-		if result.Status != "ok" {
-			return writeJSONPreservingPayload(g, stdout, stderr, result)
-		}
-		return writeJSON(g, stdout, stderr, result)
+		return writeJSONWithOK(g, stdout, stderr, result, result.Status == "ok", result.Status != "ok")
 	}
 	if g.format == output.Plain {
 		stopID := ""
@@ -1342,10 +1394,8 @@ func validateWatchDelivery(g globals, sender notify.OpenClaw) error {
 
 func writeWatchResult(g globals, stdout, stderr io.Writer, result watchResult) int {
 	if g.format == output.JSON {
-		if result.Status != "due" {
-			return writeJSONPreservingPayload(g, stdout, stderr, result)
-		}
-		return writeJSON(g, stdout, stderr, result)
+		ok := (result.Status == "due" || result.Status == "delayed") && result.NotificationError == ""
+		return writeJSONWithOK(g, stdout, stderr, result, ok, !ok)
 	}
 	if g.format == output.Plain {
 		arrivalLine := ""

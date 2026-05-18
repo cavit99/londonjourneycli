@@ -8,6 +8,7 @@
 
 - --json stable JSON output
 - --output <path> project JSON output by dot path; requires --json and must appear before the command
+- --envelope wrap JSON output in {ok,schemaVersion,command,requestedAt,data}; requires --json; ok mirrors whether the command exits 0; sensitive delivery target/token args are redacted from command
 - --plain stable tab-separated output for LondonJourneyCLI-owned output
 - --skills-dir <dir> skill root override
 - --timeout <duration> command timeout, default 30s
