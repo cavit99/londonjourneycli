@@ -83,8 +83,25 @@ type FareOption struct {
 	Currency    string   `json:"currency"`
 }
 
+type AdditionalProperty struct {
+	Category        string `json:"category,omitempty"`
+	Key             string `json:"key,omitempty"`
+	SourceSystemKey string `json:"sourceSystemKey,omitempty"`
+	Value           string `json:"value,omitempty"`
+}
+
+type StopPointWithProperties struct {
+	StopPoint
+	StopType             string               `json:"stopType,omitempty"`
+	AdditionalProperties []AdditionalProperty `json:"additionalProperties,omitempty"`
+}
+
 type StopPointsResponse struct {
 	StopPoints []StopPoint `json:"stopPoints"`
+}
+
+type stopPointsWithPropertiesResponse struct {
+	StopPoints []StopPointWithProperties `json:"stopPoints"`
 }
 
 type Arrival struct {
@@ -321,29 +338,18 @@ func (c *Client) StopPoint(ctx context.Context, stopID string) (StopPoint, error
 }
 
 type NearbyStopOptions struct {
-	Lat       float64
-	Lon       float64
-	Radius    int
-	Modes     []string
-	StopTypes []string
-	Limit     int
+	Lat        float64
+	Lon        float64
+	Radius     int
+	Modes      []string
+	StopTypes  []string
+	Categories []string
+	Limit      int
 }
 
 func (c *Client) NearbyStops(ctx context.Context, opts NearbyStopOptions) ([]StopPoint, error) {
-	params := url.Values{}
-	params.Set("lat", fmt.Sprintf("%.6f", opts.Lat))
-	params.Set("lon", fmt.Sprintf("%.6f", opts.Lon))
-	if opts.Radius > 0 {
-		params.Set("radius", fmt.Sprintf("%d", opts.Radius))
-	}
-	setCSVParam(params, "modes", opts.Modes)
-	setCSVParam(params, "stopTypes", opts.StopTypes)
-	u, err := c.endpoint("/StopPoint", params)
-	if err != nil {
-		return nil, err
-	}
 	var out StopPointsResponse
-	if err := c.getJSON(ctx, u, &out); err != nil {
+	if err := c.nearbyStops(ctx, opts, &out); err != nil {
 		return nil, err
 	}
 	stops := out.StopPoints
@@ -362,6 +368,46 @@ func (c *Client) NearbyStops(ctx context.Context, opts NearbyStopOptions) ([]Sto
 		stops = stops[:opts.Limit]
 	}
 	return stops, nil
+}
+
+func (c *Client) NearbyStopsWithProperties(ctx context.Context, opts NearbyStopOptions) ([]StopPointWithProperties, error) {
+	var out stopPointsWithPropertiesResponse
+	if err := c.nearbyStops(ctx, opts, &out); err != nil {
+		return nil, err
+	}
+	stops := out.StopPoints
+	if stops == nil {
+		stops = []StopPointWithProperties{}
+	}
+	for i := range stops {
+		if stops[i].ID == "" {
+			stops[i].ID = stops[i].NaptanID
+		}
+	}
+	sort.SliceStable(stops, func(i, j int) bool {
+		return stopDistance(stops[i].StopPoint) < stopDistance(stops[j].StopPoint)
+	})
+	if opts.Limit >= 0 && opts.Limit < len(stops) {
+		stops = stops[:opts.Limit]
+	}
+	return stops, nil
+}
+
+func (c *Client) nearbyStops(ctx context.Context, opts NearbyStopOptions, out any) error {
+	params := url.Values{}
+	params.Set("lat", fmt.Sprintf("%.6f", opts.Lat))
+	params.Set("lon", fmt.Sprintf("%.6f", opts.Lon))
+	if opts.Radius > 0 {
+		params.Set("radius", fmt.Sprintf("%d", opts.Radius))
+	}
+	setCSVParam(params, "modes", opts.Modes)
+	setCSVParam(params, "stopTypes", opts.StopTypes)
+	setCSVParam(params, "categories", opts.Categories)
+	u, err := c.endpoint("/StopPoint", params)
+	if err != nil {
+		return err
+	}
+	return c.getJSON(ctx, u, out)
 }
 
 func stopDistance(stop StopPoint) float64 {

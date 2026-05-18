@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -25,9 +26,31 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		_, _ = w.Write([]byte("[{\"id\":\"victoria\",\"name\":\"Victoria\",\"modeName\":\"tube\",\"routeSections\":[{\"direction\":\"inbound\",\"originationName\":\"Walthamstow Central\",\"destinationName\":\"Brixton\",\"originator\":\"940GZZLUWWL\",\"destination\":\"940GZZLUBXN\",\"serviceType\":\"Regular\"}]}]"))
 	})
 	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("{\"Query\":\"London Bridge\",\"Total\":1,\"Matches\":[{\"ID\":\"490000139R\",\"Name\":\"London Bridge Station\",\"Lat\":51.5,\"Lon\":-0.08,\"Modes\":[\"bus\"]}]}"))
+		switch r.URL.Query().Get("query") {
+		case "Oxford Circus":
+			if got := r.URL.Query().Get("modes"); got != "tube" {
+				t.Fatalf("modes query=%q", got)
+			}
+			_, _ = w.Write([]byte("{\"Query\":\"Oxford Circus\",\"Total\":1,\"Matches\":[{\"ID\":\"940GZZLUOXC\",\"Name\":\"Oxford Circus Underground Station\",\"Lat\":51.515224,\"Lon\":-0.141903,\"Modes\":[\"tube\"],\"topMostParentId\":\"940GZZLUOXC\"}]}"))
+		default:
+			_, _ = w.Write([]byte("{\"Query\":\"London Bridge\",\"Total\":1,\"Matches\":[{\"ID\":\"490000139R\",\"Name\":\"London Bridge Station\",\"Lat\":51.5,\"Lon\":-0.08,\"Modes\":[\"bus\"]}]}"))
+		}
 	})
 	mux.HandleFunc("/StopPoint", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("modes"); got == "tube" {
+			if got := r.URL.Query().Get("stopTypes"); got != "NaptanMetroStation" {
+				t.Fatalf("stopTypes=%q", got)
+			}
+			if got := r.URL.Query().Get("categories"); got != "Accessibility,Facility" {
+				t.Fatalf("categories=%q", got)
+			}
+			_, _ = w.Write([]byte(`{"stopPoints":[
+				{"id":"940GZZLUOXC","commonName":"Oxford Circus Underground Station","lat":51.515224,"lon":-0.141903,"distance":67,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Facility","key":"Lifts","value":"0"},{"category":"Accessibility","key":"AccessViaLift","value":"No"}]},
+				{"id":"940GZZLUGPK","commonName":"Green Park Underground Station","lat":51.506947,"lon":-0.142787,"distance":905,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Facility","key":"Lifts","value":"5"},{"category":"Accessibility","key":"AccessViaLift","value":"Yes"}]},
+				{"id":"940GZZLUBND","commonName":"Bond Street Underground Station","lat":51.514304,"lon":-0.149723,"distance":609,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Facility","key":"Lifts","value":"1"}]}
+			]}`))
+			return
+		}
 		if got := r.URL.Query().Get("modes"); got != "bus" {
 			t.Fatalf("modes=%q", got)
 		}
@@ -96,6 +119,11 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		{name: "nearby meridian", args: []string{"--json", "tfl", "nearby-stops", "--lat", "51.48", "--lon", "0", "--limit", "1"}, want: "London Bridge Bus Station", code: exitcode.OK},
 		{name: "nearby plain", args: []string{"--plain", "tfl", "nearby-stops", "--lat", "51.505", "--lon", "-0.087", "--limit", "1"}, want: "490000139R\tLondon Bridge Bus Station\tStop D\tD\t42", code: exitcode.OK},
 		{name: "nearby empty human", args: []string{"tfl", "nearby-stops", "--lat", "51.505", "--lon", "-0.087", "--radius", "1"}, want: "No nearby stops found.", code: exitcode.OK},
+		{name: "accessible stations near", args: []string{"--json", "tfl", "accessible-stations", "--near", "Oxford Circus", "--mode", "tube", "--radius", "1200", "--require-lift"}, want: "Bond Street Underground Station", code: exitcode.OK},
+		{name: "accessible stations lat lon", args: []string{"--json", "tfl", "accessible-stations", "--lat", "51.515224", "--lon", "-0.141903", "--mode", "tube", "--radius", "1200", "--require-lift"}, want: "Green Park Underground Station", code: exitcode.OK},
+		{name: "accessible stations location", args: []string{"--json", "tfl", "accessible-stations", "--location", "51.515224,-0.141903", "--mode", "tube", "--radius", "1200", "--require-lift"}, want: "\"accessViaLift\": true", code: exitcode.OK},
+		{name: "accessible stations plain", args: []string{"--plain", "tfl", "accessible-stations", "--near", "Oxford Circus", "--mode", "tube", "--radius", "1200", "--require-step-free"}, want: "confirmed_step_free", code: exitcode.OK},
+		{name: "accessible stations human", args: []string{"tfl", "accessible-stations", "--near", "Oxford Circus", "--mode", "tube", "--radius", "1200", "--require-step-free"}, want: "confirmed step-free", code: exitcode.OK},
 		{name: "search", args: []string{"--json", "tfl", "stop-search", "London Bridge", "--limit", "1"}, want: "London Bridge Station", code: exitcode.OK},
 		{name: "stop-info", args: []string{"--json", "tfl", "stop-info", "--stop", "490G00008459"}, want: "490008459S", code: exitcode.OK},
 		{name: "stop-info output projection", args: []string{"--json", "--output", "id", "tfl", "stop-info", "--stop", "490G00008459"}, want: "\"490G00008459\"", code: exitcode.OK},
@@ -135,6 +163,91 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 	}
 
 	_ = os.Getenv("TFL_BASE_URL")
+}
+
+func TestTFLAccessibleStationsNearRequiresLiftSortsAfterFiltering(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("query"); got != "Oxford Circus" {
+			t.Fatalf("query=%q", got)
+		}
+		if got := r.URL.Query().Get("modes"); got != "tube" {
+			t.Fatalf("modes=%q", got)
+		}
+		if got := r.URL.Query().Get("maxResults"); got != "1" {
+			t.Fatalf("maxResults=%q", got)
+		}
+		_, _ = w.Write([]byte(`{"Query":"Oxford Circus","Total":1,"Matches":[{"ID":"940GZZLUOXC","Name":"Oxford Circus Underground Station","Lat":51.515224,"Lon":-0.141903,"Modes":["tube"],"topMostParentId":"940GZZLUOXC"}]}`))
+	})
+	mux.HandleFunc("/StopPoint", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("lat"); got != "51.515224" {
+			t.Fatalf("lat=%q", got)
+		}
+		if got := r.URL.Query().Get("lon"); got != "-0.141903" {
+			t.Fatalf("lon=%q", got)
+		}
+		if got := r.URL.Query().Get("radius"); got != "1200" {
+			t.Fatalf("radius=%q", got)
+		}
+		if got := r.URL.Query().Get("modes"); got != "tube" {
+			t.Fatalf("nearby modes=%q", got)
+		}
+		if got := r.URL.Query().Get("stopTypes"); got != "NaptanMetroStation" {
+			t.Fatalf("stopTypes=%q", got)
+		}
+		if got := r.URL.Query().Get("categories"); got != "Accessibility,Facility" {
+			t.Fatalf("categories=%q", got)
+		}
+		_, _ = w.Write([]byte(`{"stopPoints":[
+			{"id":"940GZZLUOXC","commonName":"Oxford Circus Underground Station","lat":51.515224,"lon":-0.141903,"distance":67,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Facility","key":"Lifts","value":"0"},{"category":"Accessibility","key":"AccessViaLift","value":"No"}]},
+			{"id":"940GZZLUGPK","commonName":"Green Park Underground Station","lat":51.506947,"lon":-0.142787,"distance":905,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Accessibility","key":"AccessViaLift","value":"Yes"},{"category":"Accessibility","key":"SpecificEntranceRequired","value":"Yes"},{"category":"Accessibility","key":"SpecificEntranceInstructions","value":"Use the Piccadilly north entrance."}]},
+			{"id":"940GZZLUBND","commonName":"Bond Street Underground Station","lat":51.514304,"lon":-0.149723,"distance":609,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Facility","key":"Lifts","value":"1"}]}
+		]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("TFL_BASE_URL", srv.URL)
+
+	var out, errb bytes.Buffer
+	code := Run(context.Background(), []string{"--json", "tfl", "accessible-stations", "--near", "Oxford Circus", "--mode", "tube", "--radius", "1200", "--require-lift"}, &out, &errb)
+	if code != exitcode.OK {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	var result accessibleStationsResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if result.Status != "ok" || result.ResolvedNear == nil || result.ResolvedNear.ID != "940GZZLUOXC" {
+		t.Fatalf("unexpected result metadata: %+v", result)
+	}
+	if len(result.Stations) != 2 {
+		t.Fatalf("expected 2 lift-access stations, got %+v", result.Stations)
+	}
+	if result.Stations[0].ID != "940GZZLUBND" || result.Stations[1].ID != "940GZZLUGPK" {
+		t.Fatalf("stations not filtered/sorted by distance: %+v", result.Stations)
+	}
+	if result.Stations[0].Lifts == nil || *result.Stations[0].Lifts != 1 || result.Stations[0].StepFreeAccess || result.Stations[0].AccessStatus != "lift_present_unconfirmed" {
+		t.Fatalf("Bond Street lift fields not derived: %+v", result.Stations[0])
+	}
+	if result.Stations[1].AccessViaLift == nil || !*result.Stations[1].AccessViaLift || !result.Stations[1].StepFreeAccess || result.Stations[1].AccessStatus != "confirmed_step_free" {
+		t.Fatalf("Green Park accessViaLift fields not derived: %+v", result.Stations[1])
+	}
+	if result.Stations[1].SpecificEntranceRequired == nil || !*result.Stations[1].SpecificEntranceRequired || result.Stations[1].SpecificEntranceInstructions == "" {
+		t.Fatalf("Green Park entrance fields not derived: %+v", result.Stations[1])
+	}
+
+	out.Reset()
+	errb.Reset()
+	code = Run(context.Background(), []string{"--json", "tfl", "accessible-stations", "--near", "Oxford Circus", "--mode", "tube", "--radius", "1200", "--require-step-free"}, &out, &errb)
+	if code != exitcode.OK {
+		t.Fatalf("step-free code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode step-free output: %v\n%s", err, out.String())
+	}
+	if len(result.Stations) != 1 || result.Stations[0].ID != "940GZZLUGPK" || !result.Stations[0].StepFreeAccess {
+		t.Fatalf("expected only confirmed step-free station, got %+v", result.Stations)
+	}
 }
 
 func TestTFLNextArrivalQuerySkipsSearchMatchesWithNoPredictions(t *testing.T) {

@@ -34,6 +34,17 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 		_, _ = w.Write([]byte("{\"Query\":\"London Bridge\",\"Total\":1,\"Matches\":[{\"ID\":\"490000139R\",\"Name\":\"London Bridge Station\",\"Lat\":51.5,\"Lon\":-0.08,\"Modes\":[\"bus\"]}]}"))
 	})
 	mux.HandleFunc("/StopPoint", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("modes"); got == "tube" {
+			if got := r.URL.Query().Get("stopTypes"); got != "NaptanMetroStation" {
+				t.Fatalf("stopTypes=%q", got)
+			}
+			if got := r.URL.Query().Get("categories"); got != "Accessibility,Facility" {
+				t.Fatalf("categories=%q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"stopPoints":[{"id":"940GZZLUBND","commonName":"Bond Street Underground Station","lat":51.514304,"lon":-0.149723,"distance":609,"modes":["tube"],"stopType":"NaptanMetroStation","additionalProperties":[{"category":"Facility","key":"Lifts","value":"1"}]}]}`))
+			return
+		}
 		if got := r.URL.Query().Get("modes"); got != "bus" {
 			t.Fatalf("modes=%q", got)
 		}
@@ -182,6 +193,13 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	}
 	if len(nearby) != 1 || nearby[0].ID != "490000139R" || nearby[0].Distance == nil || *nearby[0].Distance != 42 {
 		t.Fatalf("unexpected nearby stops: %+v", nearby)
+	}
+	stations, err := c.NearbyStopsWithProperties(context.Background(), NearbyStopOptions{Lat: 51.515224, Lon: -0.141903, Radius: 1200, Modes: []string{"tube"}, StopTypes: []string{"NaptanMetroStation"}, Categories: []string{"Accessibility", "Facility"}, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stations) != 1 || stations[0].StopType != "NaptanMetroStation" || len(stations[0].AdditionalProperties) != 1 || stations[0].AdditionalProperties[0].Key != "Lifts" {
+		t.Fatalf("unexpected accessible station properties: %+v", stations)
 	}
 
 	arrivals, err := c.Arrivals(context.Background(), "490000139R")

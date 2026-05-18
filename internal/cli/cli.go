@@ -583,7 +583,7 @@ func runArgvWithIO(ctx context.Context, argv []string, opts runOptions, stdout, 
 
 func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|line-routes|nearby-stops|stop-search|stop-info|arrivals|next-arrival|journey|fares|watch-arrival>")
+		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|line-routes|nearby-stops|accessible-stations|stop-search|stop-info|arrivals|next-arrival|journey|fare|fares|watch-arrival>")
 		return exitcode.Usage
 	}
 	client := tfl.NewClient(os.Getenv("TFL_APP_KEY"))
@@ -599,6 +599,8 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 		return tflLineRoutes(ctx, g, client, args[1:], stdout, stderr)
 	case "nearby-stops":
 		return tflNearbyStops(ctx, g, client, args[1:], stdout, stderr)
+	case "accessible-stations":
+		return tflAccessibleStations(ctx, g, client, args[1:], stdout, stderr)
 	case "stop-search":
 		return tflStopSearch(ctx, g, client, args[1:], stdout, stderr)
 	case "stop-info":
@@ -843,6 +845,165 @@ func tflNearbyStops(ctx context.Context, g globals, client *tfl.Client, args []s
 	return exitcode.OK
 }
 
+func tflAccessibleStations(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("accessible-stations", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	near := fs.String("near", "", "place or station query to resolve with TfL stop search")
+	lat := fs.Float64("lat", 0, "latitude")
+	lon := fs.Float64("lon", 0, "longitude")
+	location := fs.String("location", "", "location text, map link, geo URI, or lat,lon")
+	radius := fs.Int("radius", 1200, "search radius in metres")
+	mode := fs.String("mode", defaultAccessibleStationModes, "comma-separated modes, or all")
+	stopTypes := fs.String("stop-type", "", "comma-separated TfL stop types; defaults to station-like stop types for the selected modes")
+	limit := fs.Int("limit", 10, "maximum stations after filtering")
+	requireLift := fs.Bool("require-lift", false, "only include stations with a lift signal")
+	requireStepFree := fs.Bool("require-step-free", false, "only include stations with TfL-confirmed access via lift")
+	if err := fs.Parse(args); err != nil {
+		return exitcode.Usage
+	}
+	modes := queryModes(*mode)
+	stopTypeList := csvArgs(*stopTypes)
+	if !flagSeen(fs, "stop-type") || len(stopTypeList) == 0 {
+		stopTypeList = defaultAccessibleStationStopTypes(modes)
+	}
+
+	nearQuery := strings.TrimSpace(*near)
+	locationText := strings.TrimSpace(*location)
+	latSeen := flagSeen(fs, "lat")
+	lonSeen := flagSeen(fs, "lon")
+	locationSources := 0
+	if nearQuery != "" {
+		locationSources++
+	}
+	if locationText != "" {
+		locationSources++
+	}
+	if latSeen || lonSeen {
+		locationSources++
+	}
+	if locationSources != 1 {
+		fmt.Fprintln(stderr, "provide exactly one of --near, --location, or both --lat and --lon")
+		return exitcode.Usage
+	}
+	if latSeen != lonSeen {
+		fmt.Fprintln(stderr, "provide both --lat and --lon")
+		return exitcode.Usage
+	}
+	if *radius <= 0 {
+		fmt.Fprintln(stderr, "--radius must be > 0")
+		return exitcode.Usage
+	}
+	if *limit <= 0 {
+		fmt.Fprintln(stderr, "--limit must be > 0")
+		return exitcode.Usage
+	}
+
+	result := accessibleStationsResult{
+		Status:          "ok",
+		Radius:          *radius,
+		Modes:           modes,
+		StopTypes:       stopTypeList,
+		RequireLift:     *requireLift,
+		RequireStepFree: *requireStepFree,
+		Stations:        []accessibleStation{},
+	}
+
+	if nearQuery != "" {
+		search, err := client.StopSearchWithOptions(ctx, nearQuery, tfl.StopSearchOptions{Modes: modes, MaxResults: 1})
+		if err != nil {
+			if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+				return code
+			}
+			fmt.Fprintln(stderr, err)
+			return exitcode.Network
+		}
+		result.Query = nearQuery
+		result.Candidates = search.Total
+		if len(search.Matches) == 0 {
+			result.Status = "near_not_found"
+			result.Message = fmt.Sprintf("TfL found no stop or station matching %q.", nearQuery)
+			if code := writeAccessibleStationsResult(g, stdout, stderr, result); code != exitcode.OK {
+				return code
+			}
+			return exitcode.NoData
+		}
+		resolved := stopFromMatch(search.Matches[0])
+		result.ResolvedNear = resolved
+		*lat = resolved.Lat
+		*lon = resolved.Lon
+	} else if locationText != "" {
+		parsedLat, parsedLon, err := parseLocationArg(locationText)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitcode.Usage
+		}
+		*lat = parsedLat
+		*lon = parsedLon
+	} else if !latSeen || !lonSeen {
+		fmt.Fprintln(stderr, "provide exactly one of --near, --location, or both --lat and --lon")
+		return exitcode.Usage
+	}
+	if err := validateLatLon(*lat, *lon); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitcode.Usage
+	}
+	result.Lat = *lat
+	result.Lon = *lon
+
+	stops, err := client.NearbyStopsWithProperties(ctx, tfl.NearbyStopOptions{
+		Lat:        *lat,
+		Lon:        *lon,
+		Radius:     *radius,
+		Modes:      modes,
+		StopTypes:  stopTypeList,
+		Categories: accessibleStationPropertyCategories(),
+		Limit:      -1,
+	})
+	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
+		fmt.Fprintln(stderr, err)
+		return exitcode.Network
+	}
+	for _, stop := range stops {
+		station := accessibleStationFromStop(stop)
+		if *requireStepFree && !station.StepFreeAccess {
+			continue
+		}
+		if *requireLift && !station.LiftPresent && !station.StepFreeAccess {
+			continue
+		}
+		result.Stations = append(result.Stations, station)
+		if len(result.Stations) == *limit {
+			break
+		}
+	}
+	if len(result.Stations) == 0 {
+		result.Status = "no_data"
+		if *requireStepFree {
+			result.Message = fmt.Sprintf("TfL found no stations with confirmed access via lift within %dm.", *radius)
+		} else if *requireLift {
+			result.Message = fmt.Sprintf("TfL found no stations with a lift signal within %dm.", *radius)
+		} else {
+			result.Message = fmt.Sprintf("TfL found no stations within %dm.", *radius)
+		}
+	} else if *requireStepFree {
+		result.Message = fmt.Sprintf("TfL found %d stations with confirmed access via lift within %dm.", len(result.Stations), *radius)
+	} else if *requireLift {
+		result.Message = fmt.Sprintf("TfL found %d stations with a lift signal within %dm.", len(result.Stations), *radius)
+	} else {
+		result.Message = fmt.Sprintf("TfL found %d stations within %dm.", len(result.Stations), *radius)
+	}
+	if code := writeAccessibleStationsResult(g, stdout, stderr, result); code != exitcode.OK {
+		return code
+	}
+	if result.Status == "no_data" {
+		return exitcode.NoData
+	}
+	return exitcode.OK
+}
+
 func stopDistanceMeters(stop tfl.StopPoint) float64 {
 	if stop.Distance == nil {
 		return 0
@@ -855,6 +1016,11 @@ var (
 	coordPairAnchoredPattern = regexp.MustCompile(`^\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*$`)
 	latLabelPattern          = regexp.MustCompile(`(?i)\b(?:LocationLat|latitude|lat)\s*[:=]\s*([-+]?\d+(?:\.\d+)?)`)
 	lonLabelPattern          = regexp.MustCompile(`(?i)\b(?:LocationLon|longitude|lon|lng)\s*[:=]\s*([-+]?\d+(?:\.\d+)?)`)
+	liftCountPattern         = regexp.MustCompile(`\d+`)
+)
+
+const (
+	defaultAccessibleStationModes = "tube,dlr,elizabeth-line,overground,national-rail,tram"
 )
 
 func parseLocationArg(value string) (float64, float64, error) {
@@ -1249,10 +1415,160 @@ type nextArrivalResult struct {
 	Arrivals     []tfl.Arrival `json:"arrivals"`
 }
 
+type accessibleStationsResult struct {
+	Status          string              `json:"status"`
+	Message         string              `json:"message"`
+	Query           string              `json:"query,omitempty"`
+	Candidates      int                 `json:"candidates,omitempty"`
+	ResolvedNear    *resolvedStop       `json:"resolvedNear,omitempty"`
+	Lat             float64             `json:"lat"`
+	Lon             float64             `json:"lon"`
+	Radius          int                 `json:"radius"`
+	Modes           []string            `json:"modes,omitempty"`
+	StopTypes       []string            `json:"stopTypes,omitempty"`
+	RequireLift     bool                `json:"requireLift"`
+	RequireStepFree bool                `json:"requireStepFree"`
+	Stations        []accessibleStation `json:"stations"`
+}
+
+type accessibleStation struct {
+	ID                           string   `json:"id"`
+	Name                         string   `json:"name"`
+	Lat                          float64  `json:"lat"`
+	Lon                          float64  `json:"lon"`
+	Distance                     *float64 `json:"distance"`
+	Modes                        []string `json:"modes,omitempty"`
+	StopType                     string   `json:"stopType,omitempty"`
+	AccessStatus                 string   `json:"accessStatus"`
+	StepFreeAccess               bool     `json:"stepFreeAccess"`
+	LiftPresent                  bool     `json:"liftPresent"`
+	Lifts                        *int     `json:"lifts"`
+	AccessViaLift                *bool    `json:"accessViaLift"`
+	LimitedCapacityLift          *bool    `json:"limitedCapacityLift"`
+	SpecificEntranceRequired     *bool    `json:"specificEntranceRequired"`
+	SpecificEntranceInstructions string   `json:"specificEntranceInstructions,omitempty"`
+	AdditionalInformation        string   `json:"additionalInformation,omitempty"`
+}
+
 type tflErrorResult struct {
 	Status  string        `json:"status"`
 	Message string        `json:"message"`
 	Error   *tfl.APIError `json:"error,omitempty"`
+}
+
+func accessibleStationFromStop(stop tfl.StopPointWithProperties) accessibleStation {
+	lifts := liftCount(stop.AdditionalProperties)
+	accessViaLift := accessViaLiftValue(stop.AdditionalProperties)
+	liftPresent := lifts != nil && *lifts > 0
+	stepFreeAccess := accessViaLift != nil && *accessViaLift
+	return accessibleStation{
+		ID:                           stop.ID,
+		Name:                         stop.CommonName,
+		Lat:                          stop.Lat,
+		Lon:                          stop.Lon,
+		Distance:                     stop.Distance,
+		Modes:                        stop.Modes,
+		StopType:                     stop.StopType,
+		AccessStatus:                 accessibleStationStatus(lifts, accessViaLift),
+		StepFreeAccess:               stepFreeAccess,
+		LiftPresent:                  liftPresent,
+		Lifts:                        lifts,
+		AccessViaLift:                accessViaLift,
+		LimitedCapacityLift:          boolAdditionalPropertyValue(stop.AdditionalProperties, "Accessibility", "LimitedCapacityLift"),
+		SpecificEntranceRequired:     boolAdditionalPropertyValue(stop.AdditionalProperties, "Accessibility", "SpecificEntranceRequired"),
+		SpecificEntranceInstructions: firstAdditionalPropertyValue(stop.AdditionalProperties, "Accessibility", "SpecificEntranceInstructions"),
+		AdditionalInformation:        firstAdditionalPropertyValue(stop.AdditionalProperties, "Accessibility", "AdditionalInformation", "AddtionalInformation"),
+	}
+}
+
+func accessibleStationStatus(lifts *int, accessViaLift *bool) string {
+	if accessViaLift != nil {
+		if *accessViaLift {
+			return "confirmed_step_free"
+		}
+		return "no_lift_access"
+	}
+	if lifts != nil {
+		if *lifts > 0 {
+			return "lift_present_unconfirmed"
+		}
+		return "no_lifts"
+	}
+	return "unknown"
+}
+
+func liftCount(props []tfl.AdditionalProperty) *int {
+	value, ok := additionalPropertyValue(props, "Facility", "Lifts")
+	if !ok {
+		return nil
+	}
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	if n, err := strconv.Atoi(trimmed); err == nil {
+		return &n
+	}
+	match := liftCountPattern.FindString(trimmed)
+	if match == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(match)
+	if err != nil {
+		return nil
+	}
+	return &n
+}
+
+func accessViaLiftValue(props []tfl.AdditionalProperty) *bool {
+	return boolAdditionalPropertyValue(props, "Accessibility", "AccessViaLift")
+}
+
+func boolAdditionalPropertyValue(props []tfl.AdditionalProperty, category, key string) *bool {
+	value, ok := additionalPropertyValue(props, category, key)
+	if !ok {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "yes", "true", "1", "y":
+		v := true
+		return &v
+	case "no", "false", "0", "n":
+		v := false
+		return &v
+	default:
+		return nil
+	}
+}
+
+func firstAdditionalPropertyValue(props []tfl.AdditionalProperty, category string, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := additionalPropertyValue(props, category, key); ok {
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+func additionalPropertyValue(props []tfl.AdditionalProperty, category, key string) (string, bool) {
+	category = normalizeAdditionalPropertyKey(category)
+	key = normalizeAdditionalPropertyKey(key)
+	for _, prop := range props {
+		if normalizeAdditionalPropertyKey(prop.Category) == category && normalizeAdditionalPropertyKey(prop.Key) == key {
+			return prop.Value, true
+		}
+	}
+	return "", false
+}
+
+func normalizeAdditionalPropertyKey(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, " ", "")
+	value = strings.ReplaceAll(value, "-", "")
+	value = strings.ReplaceAll(value, "_", "")
+	return value
 }
 
 func writeStructuredTfLError(g globals, stdout, stderr io.Writer, err error) (int, bool) {
@@ -1417,7 +1733,7 @@ func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []strin
 		Via:                      *via,
 		Preference:               canonicalJourneyPreference(*preference),
 		Modes:                    csvArgs(*modes),
-		AccessibilityPreferences: csvArgs(*accessibility),
+		AccessibilityPreferences: canonicalAccessibilityPreferences(*accessibility),
 		MaxTransferMinutes:       *maxTransfer,
 		MaxWalkingMinutes:        *maxWalking,
 		WalkingSpeed:             canonicalWalkingSpeed(*walkingSpeed),
@@ -2020,6 +2336,45 @@ func queryModes(value string) []string {
 	return csvArgs(value)
 }
 
+func defaultAccessibleStationStopTypes(modes []string) []string {
+	if len(modes) == 0 {
+		return []string{"NaptanMetroStation", "NaptanRailStation", "NaptanFerryPort", "NaptanPublicBusCoachTram", "NaptanCoachStation"}
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(stopType string) {
+		if !seen[stopType] {
+			seen[stopType] = true
+			out = append(out, stopType)
+		}
+	}
+	for _, mode := range modes {
+		switch strings.ToLower(strings.TrimSpace(mode)) {
+		case "tube", "dlr", "tram":
+			add("NaptanMetroStation")
+		case "elizabeth-line":
+			add("NaptanMetroStation")
+			add("NaptanRailStation")
+		case "overground", "national-rail", "train":
+			add("NaptanRailStation")
+		case "river", "river-bus", "river-tour":
+			add("NaptanFerryPort")
+		case "bus":
+			add("NaptanPublicBusCoachTram")
+		case "coach":
+			add("NaptanCoachStation")
+		}
+	}
+	if len(out) == 0 {
+		return []string{"NaptanMetroStation", "NaptanRailStation"}
+	}
+	return out
+}
+
+func accessibleStationPropertyCategories() []string {
+	return []string{"Accessibility", "Facility"}
+}
+
 func resolvedStopLabel(stop *resolvedStop, fallback string) string {
 	if stop == nil {
 		return fallback
@@ -2081,6 +2436,101 @@ func writeNextArrivalResult(g globals, stdout, stderr io.Writer, result nextArri
 	}
 	fmt.Fprintln(stdout, result.Message)
 	return exitcode.OK
+}
+
+func writeAccessibleStationsResult(g globals, stdout, stderr io.Writer, result accessibleStationsResult) int {
+	if g.format == output.JSON {
+		return writeJSONWithOK(g, stdout, stderr, result, result.Status == "ok", result.Status != "ok")
+	}
+	if g.format == output.Plain {
+		var rows [][]string
+		for _, station := range result.Stations {
+			rows = append(rows, []string{
+				station.ID,
+				station.Name,
+				fmt.Sprintf("%.0f", accessibleStationDistanceMeters(station)),
+				station.AccessStatus,
+				strconv.FormatBool(station.StepFreeAccess),
+				strconv.FormatBool(station.LiftPresent),
+				formatOptionalInt(station.Lifts),
+				formatOptionalBool(station.AccessViaLift),
+				formatOptionalBool(station.LimitedCapacityLift),
+				formatOptionalBool(station.SpecificEntranceRequired),
+				fmt.Sprintf("%.5f", station.Lat),
+				fmt.Sprintf("%.5f", station.Lon),
+				strings.Join(station.Modes, ","),
+			})
+		}
+		if len(rows) == 0 {
+			rows = append(rows, []string{result.Status, result.Message})
+		}
+		_ = output.WritePlainRows(stdout, rows)
+		return exitcode.OK
+	}
+	if len(result.Stations) == 0 {
+		fmt.Fprintln(stdout, result.Message)
+		return exitcode.OK
+	}
+	for _, station := range result.Stations {
+		fmt.Fprintf(stdout, "%s\t%.0fm\t%s\t%s\t%s\n", station.Name, accessibleStationDistanceMeters(station), humanAccessStatus(station.AccessStatus), liftLabel(station.Lifts), accessViaLiftLabel(station.AccessViaLift))
+	}
+	return exitcode.OK
+}
+
+func accessibleStationDistanceMeters(station accessibleStation) float64 {
+	if station.Distance == nil {
+		return 0
+	}
+	return *station.Distance
+}
+
+func liftLabel(lifts *int) string {
+	if lifts == nil {
+		return "lifts unknown"
+	}
+	if *lifts == 1 {
+		return "1 lift"
+	}
+	return fmt.Sprintf("%d lifts", *lifts)
+}
+
+func humanAccessStatus(status string) string {
+	switch status {
+	case "confirmed_step_free":
+		return "confirmed step-free"
+	case "lift_present_unconfirmed":
+		return "lift present, step-free unconfirmed"
+	case "no_lift_access":
+		return "no access via lift"
+	case "no_lifts":
+		return "no lifts"
+	default:
+		return "unknown accessibility"
+	}
+}
+
+func accessViaLiftLabel(accessViaLift *bool) string {
+	if accessViaLift == nil {
+		return "access via lift unknown"
+	}
+	if *accessViaLift {
+		return "access via lift yes"
+	}
+	return "access via lift no"
+}
+
+func formatOptionalInt(value *int) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.Itoa(*value)
+}
+
+func formatOptionalBool(value *bool) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatBool(*value)
 }
 
 func sendWatchNotification(ctx context.Context, sender notify.OpenClaw, message string) (bool, error) {
@@ -2202,6 +2652,27 @@ func canonicalWalkingSpeed(value string) string {
 	}
 }
 
+func canonicalAccessibilityPreferences(value string) []string {
+	var out []string
+	for _, pref := range csvArgs(value) {
+		switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(pref), "-", "")) {
+		case "nosolidstairs", "nostairs":
+			out = append(out, "NoSolidStairs")
+		case "noescalators":
+			out = append(out, "NoEscalators")
+		case "noelevators", "nolifts":
+			out = append(out, "NoElevators")
+		case "stepfreetovehicle", "vehicle":
+			out = append(out, "StepFreeToVehicle")
+		case "stepfreetoplatform", "platform", "stepfree":
+			out = append(out, "StepFreeToPlatform")
+		default:
+			out = append(out, pref)
+		}
+	}
+	return out
+}
+
 func canonicalCyclePreference(value string) string {
 	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "-", "")) {
 	case "":
@@ -2238,6 +2709,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  tfl disruptions [--line ID]  Show active TfL disruptions")
 	fmt.Fprintln(w, "  tfl line-routes --line ID    Show line route sections")
 	fmt.Fprintln(w, "  tfl nearby-stops <coords>    Find stops near coordinates")
+	fmt.Fprintln(w, "  tfl accessible-stations ...  Find nearby stations with lift/access data")
 	fmt.Fprintln(w, "  tfl stop-search <query>      Search TfL stops and stations")
 	fmt.Fprintln(w, "  tfl stop-info --stop ID      Show a stop point and child stops")
 	fmt.Fprintln(w, "  tfl arrivals --stop ID       Show live arrivals")

@@ -28,6 +28,16 @@ Use tfl fare for fare/cost questions. Prefer --from/--to with date/time for exac
 
 Use tfl nearby-stops when the user gives a current GPS/location coordinate or when a resolved address yields coordinates and the agent needs concrete stop IDs nearby. Prefer --location for OpenClaw/WhatsApp pin text such as "📍 51.433533, -0.095258", geo: URIs, or map links with embedded coordinates; use --lat/--lon for separate LocationLat/LocationLon fields.
 
+Use journey's native --accessibility preferences for route questions such as "get me there step-free":
+
+    londonjourneycli --json tfl journey --from "Oxford Circus" --to "King's Cross" --mode tube --accessibility step-free-to-platform --between-entrances
+
+Use tfl accessible-stations for station-discovery questions such as "Which tube stations near Oxford Circus have confirmed lift access?":
+
+    londonjourneycli --json tfl accessible-stations --near "Oxford Circus" --mode tube --radius 1200 --require-step-free
+
+The command resolves --near with TfL StopSearch, then checks nearby station stop points through /StopPoint with only Accessibility and Facility categories. JSON distinguishes confirmed step-free access from lift-present-but-unconfirmed stations with accessStatus, stepFreeAccess, liftPresent, lifts, and accessViaLift. Use --require-step-free for confirmed access via lift; use --require-lift only when a broader lift signal is useful. It also accepts --lat/--lon or --location when the agent already has coordinates.
+
 ## Time-Critical Alerts
 
 For transport, delivery, pickup, and deadline warnings, a silent run is a failure. Use commands that expose all terminal states as data, and configure visible delivery where required.

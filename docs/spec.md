@@ -32,6 +32,7 @@ TfL:
 - londonjourneycli tfl disruptions [--line line-ids] [--mode modes]
 - londonjourneycli tfl line-routes --line line-ids
 - londonjourneycli tfl nearby-stops --lat latitude --lon longitude [--radius metres] [--mode modes] [--stop-type stopTypes] [--limit N]
+- londonjourneycli tfl accessible-stations (--near query|--lat latitude --lon longitude|--location text) [--mode modes|all] [--radius metres] [--stop-type stopTypes] [--require-step-free] [--require-lift] [--limit N]
 - londonjourneycli tfl stop-search <query> [--mode modes] [--line lines] [--max-results N] [--include-hubs] [--limit N]
 - londonjourneycli tfl stop-info --stop <id>
 - londonjourneycli tfl arrivals --stop <id> [--line N] [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--limit N]
