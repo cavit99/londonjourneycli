@@ -583,7 +583,7 @@ func runArgvWithIO(ctx context.Context, argv []string, opts runOptions, stdout, 
 
 func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|line-routes|nearby-stops|accessible-stations|stop-search|stop-info|arrivals|next-arrival|journey|fare|fares|watch-arrival>")
+		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|line-routes|nearby-stops|accessible-stations|stop-search|stop-info|arrivals|next-arrival|journey|trip|fare|fares|watch-arrival>")
 		return exitcode.Usage
 	}
 	client := tfl.NewClient(os.Getenv("TFL_APP_KEY"))
@@ -611,6 +611,8 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 		return tflNextArrival(ctx, g, client, args[1:], stdout, stderr)
 	case "journey":
 		return tflJourney(ctx, g, client, args[1:], stdout, stderr)
+	case "trip":
+		return tflTrip(ctx, g, client, args[1:], stdout, stderr)
 	case "fare", "fares":
 		return tflFares(ctx, g, client, args[1:], stdout, stderr)
 	case "watch-arrival":
@@ -1694,54 +1696,86 @@ func tflNextArrival(ctx context.Context, g globals, client *tfl.Client, args []s
 	return exitcode.OK
 }
 
+type journeyFlagValues struct {
+	from                *string
+	to                  *string
+	date                *string
+	when                *string
+	via                 *string
+	preference          *string
+	modes               *string
+	accessibility       *string
+	maxTransfer         *string
+	maxWalking          *string
+	walkingSpeed        *string
+	cyclePreference     *string
+	arriving            *bool
+	includeAlternatives *bool
+	alternativeWalking  *bool
+	alternativeCycle    *bool
+	realTime            *bool
+	betweenEntrances    *bool
+	localOnly           *bool
+}
+
+func addJourneyFlags(fs *flag.FlagSet) journeyFlagValues {
+	return journeyFlagValues{
+		from:                fs.String("from", "", "origin"),
+		to:                  fs.String("to", "", "destination"),
+		date:                fs.String("date", "", "YYYYMMDD"),
+		when:                fs.String("time", "", "HHmm"),
+		arriving:            fs.Bool("arriving", false, "treat time as arrival time"),
+		via:                 fs.String("via", "", "optional via point"),
+		preference:          fs.String("preference", "LeastTime", "LeastTime, LeastInterchange, or LeastWalking"),
+		modes:               fs.String("mode", "", "comma-separated modes, e.g. tube,elizabeth-line,bus"),
+		accessibility:       fs.String("accessibility", "", "comma-separated accessibility preferences"),
+		maxTransfer:         fs.String("max-transfer-minutes", "", "maximum transfer walking minutes"),
+		maxWalking:          fs.String("max-walking-minutes", "", "maximum journey walking minutes"),
+		walkingSpeed:        fs.String("walking-speed", "", "Slow, Average, or Fast"),
+		cyclePreference:     fs.String("cycle-preference", "", "TfL cycle preference"),
+		includeAlternatives: fs.Bool("include-alternatives", false, "include alternative public transport routes"),
+		alternativeWalking:  fs.Bool("alternative-walking", false, "include alternative walking journey"),
+		alternativeCycle:    fs.Bool("alternative-cycle", false, "include alternative cycling journey"),
+		realTime:            fs.Bool("real-time", false, "request real-time live arrivals where available"),
+		betweenEntrances:    fs.Bool("between-entrances", false, "include station entrance/platform routing"),
+		localOnly:           fs.Bool("local-only", false, "disable TfL nationalSearch"),
+	}
+}
+
+func (f journeyFlagValues) options() tfl.JourneyOptions {
+	return tfl.JourneyOptions{
+		Date:                     *f.date,
+		Time:                     *f.when,
+		Arriving:                 *f.arriving,
+		Via:                      *f.via,
+		Preference:               canonicalJourneyPreference(*f.preference),
+		Modes:                    csvArgs(*f.modes),
+		AccessibilityPreferences: canonicalAccessibilityPreferences(*f.accessibility),
+		MaxTransferMinutes:       *f.maxTransfer,
+		MaxWalkingMinutes:        *f.maxWalking,
+		WalkingSpeed:             canonicalWalkingSpeed(*f.walkingSpeed),
+		CyclePreference:          canonicalCyclePreference(*f.cyclePreference),
+		IncludeAlternativeRoutes: *f.includeAlternatives,
+		AlternativeWalking:       *f.alternativeWalking,
+		AlternativeCycle:         *f.alternativeCycle,
+		UseRealTimeLiveArrivals:  *f.realTime,
+		RouteBetweenEntrances:    *f.betweenEntrances,
+		LocalOnly:                *f.localOnly,
+	}
+}
+
 func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("journey", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	from := fs.String("from", "", "origin")
-	to := fs.String("to", "", "destination")
-	date := fs.String("date", "", "YYYYMMDD")
-	when := fs.String("time", "", "HHmm")
-	arriving := fs.Bool("arriving", false, "treat time as arrival time")
-	via := fs.String("via", "", "optional via point")
-	preference := fs.String("preference", "LeastTime", "LeastTime, LeastInterchange, or LeastWalking")
-	modes := fs.String("mode", "", "comma-separated modes, e.g. tube,elizabeth-line,bus")
-	accessibility := fs.String("accessibility", "", "comma-separated accessibility preferences")
-	maxTransfer := fs.String("max-transfer-minutes", "", "maximum transfer walking minutes")
-	maxWalking := fs.String("max-walking-minutes", "", "maximum journey walking minutes")
-	walkingSpeed := fs.String("walking-speed", "", "Slow, Average, or Fast")
-	cyclePreference := fs.String("cycle-preference", "", "TfL cycle preference")
-	includeAlternatives := fs.Bool("include-alternatives", false, "include alternative public transport routes")
-	alternativeWalking := fs.Bool("alternative-walking", false, "include alternative walking journey")
-	alternativeCycle := fs.Bool("alternative-cycle", false, "include alternative cycling journey")
-	realTime := fs.Bool("real-time", false, "request real-time live arrivals where available")
-	betweenEntrances := fs.Bool("between-entrances", false, "include station entrance/platform routing")
-	localOnly := fs.Bool("local-only", false, "disable TfL nationalSearch")
+	journeyFlags := addJourneyFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return exitcode.Usage
 	}
-	if *from == "" || *to == "" {
+	if *journeyFlags.from == "" || *journeyFlags.to == "" {
 		fmt.Fprintln(stderr, "--from and --to are required")
 		return exitcode.Usage
 	}
-	resp, err := client.Journey(ctx, *from, *to, tfl.JourneyOptions{
-		Date:                     *date,
-		Time:                     *when,
-		Arriving:                 *arriving,
-		Via:                      *via,
-		Preference:               canonicalJourneyPreference(*preference),
-		Modes:                    csvArgs(*modes),
-		AccessibilityPreferences: canonicalAccessibilityPreferences(*accessibility),
-		MaxTransferMinutes:       *maxTransfer,
-		MaxWalkingMinutes:        *maxWalking,
-		WalkingSpeed:             canonicalWalkingSpeed(*walkingSpeed),
-		CyclePreference:          canonicalCyclePreference(*cyclePreference),
-		IncludeAlternativeRoutes: *includeAlternatives,
-		AlternativeWalking:       *alternativeWalking,
-		AlternativeCycle:         *alternativeCycle,
-		UseRealTimeLiveArrivals:  *realTime,
-		RouteBetweenEntrances:    *betweenEntrances,
-		LocalOnly:                *localOnly,
-	})
+	resp, err := client.Journey(ctx, *journeyFlags.from, *journeyFlags.to, journeyFlags.options())
 	if err != nil {
 		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
 			return code
@@ -1787,6 +1821,496 @@ func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []strin
 	return exitcode.OK
 }
 
+func tflTrip(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("trip", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	journeyFlags := addJourneyFlags(fs)
+	limit := fs.Int("limit", 3, "maximum journey options to summarize")
+	if err := fs.Parse(args); err != nil {
+		return exitcode.Usage
+	}
+	if *journeyFlags.from == "" || *journeyFlags.to == "" {
+		fmt.Fprintln(stderr, "--from and --to are required")
+		return exitcode.Usage
+	}
+	if *limit <= 0 {
+		fmt.Fprintln(stderr, "--limit must be > 0")
+		return exitcode.Usage
+	}
+
+	opts := journeyFlags.options()
+	resp, err := client.Journey(ctx, *journeyFlags.from, *journeyFlags.to, opts)
+	if err != nil {
+		if code, ok := writeStructuredTfLError(g, stdout, stderr, err); ok {
+			return code
+		}
+		fmt.Fprintln(stderr, err)
+		return tflErrorExitCode(err)
+	}
+
+	result := buildTripResult(*journeyFlags.from, *journeyFlags.to, resp, opts, *limit)
+	finalCode := exitcode.OK
+	if result.Status == "no_journey" {
+		finalCode = exitcode.NoData
+	} else {
+		lineIDs := tripLineIDs(result.Disruptions.Lines)
+		if len(lineIDs) == 0 {
+			result.Disruptions.Status = "not_applicable"
+			result.Disruptions.Message = "Selected journey has no TfL line to check for disruptions."
+		} else {
+			disruptions, err := client.LineDisruptions(ctx, lineIDs, nil)
+			if err != nil {
+				result.Status = "partial"
+				result.Disruptions.Status = tripAPIStatus(err)
+				result.Disruptions.Message = "Journey planned, but TfL line disruption lookup failed."
+				result.Disruptions.Error = err.Error()
+				result.Disruptions.Active = []tfl.Disruption{}
+				finalCode = exitcode.Network
+			} else {
+				if disruptions == nil {
+					disruptions = []tfl.Disruption{}
+				}
+				result.Disruptions.Status = "ok"
+				result.Disruptions.Active = disruptions
+				if len(disruptions) == 0 {
+					result.Disruptions.Message = "No active disruptions found for selected journey lines."
+				} else {
+					result.Disruptions.Message = fmt.Sprintf("TfL reports %d active %s for selected journey lines.", len(disruptions), plural("disruption", len(disruptions)))
+				}
+			}
+		}
+	}
+	result.Message = tripMessage(result)
+	if code := writeTripResult(g, stdout, stderr, result); code != exitcode.OK {
+		return code
+	}
+	return finalCode
+}
+
+type tripResult struct {
+	Status        string                  `json:"status"`
+	Message       string                  `json:"message"`
+	From          string                  `json:"from"`
+	To            string                  `json:"to"`
+	Selected      *tripJourneySummary     `json:"selected"`
+	Journeys      []tripJourneySummary    `json:"journeys"`
+	Fare          tfl.FareQuote           `json:"fare"`
+	Disruptions   tripDisruptionResult    `json:"disruptions"`
+	Accessibility tripAccessibilityResult `json:"accessibility"`
+}
+
+type tripJourneySummary struct {
+	Option          int               `json:"option"`
+	StartDateTime   string            `json:"startDateTime"`
+	ArrivalDateTime string            `json:"arrivalDateTime"`
+	DurationMinutes int               `json:"durationMinutes"`
+	Lines           []tripLineSummary `json:"lines"`
+	Legs            []tripLegSummary  `json:"legs"`
+}
+
+type tripLegSummary struct {
+	Mode            string   `json:"mode"`
+	Line            string   `json:"line,omitempty"`
+	LineID          string   `json:"lineId,omitempty"`
+	RouteOptions    []string `json:"routeOptions,omitempty"`
+	From            string   `json:"from"`
+	To              string   `json:"to"`
+	DepartureTime   string   `json:"departureTime,omitempty"`
+	ArrivalTime     string   `json:"arrivalTime,omitempty"`
+	DurationMinutes int      `json:"durationMinutes"`
+	Instruction     string   `json:"instruction,omitempty"`
+}
+
+type tripLineSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Mode string `json:"mode,omitempty"`
+}
+
+type tripDisruptionResult struct {
+	Status  string            `json:"status"`
+	Message string            `json:"message"`
+	Lines   []tripLineSummary `json:"lines"`
+	Active  []tfl.Disruption  `json:"active"`
+	Error   string            `json:"error,omitempty"`
+}
+
+type tripAccessibilityResult struct {
+	Status                  string   `json:"status"`
+	Requested               []string `json:"requested"`
+	RouteBetweenEntrances   bool     `json:"routeBetweenEntrances"`
+	MaxWalkingMinutes       string   `json:"maxWalkingMinutes,omitempty"`
+	MaxTransferMinutes      string   `json:"maxTransferMinutes,omitempty"`
+	WalkingSpeed            string   `json:"walkingSpeed,omitempty"`
+	SelectedRequiresWalking bool     `json:"selectedRequiresWalking"`
+	Flags                   []string `json:"flags"`
+	Notes                   []string `json:"notes"`
+}
+
+func buildTripResult(from, to string, resp tfl.JourneyResponse, opts tfl.JourneyOptions, limit int) tripResult {
+	journeys := summarizeTripJourneys(resp.Journeys, limit)
+	result := tripResult{
+		Status:   "ok",
+		From:     from,
+		To:       to,
+		Journeys: journeys,
+		Fare:     emptyTripFare(from, to, "TfL returned no fare for that journey."),
+		Disruptions: tripDisruptionResult{
+			Status:  "not_applicable",
+			Message: "No selected journey lines to check for disruptions.",
+			Lines:   []tripLineSummary{},
+			Active:  []tfl.Disruption{},
+		},
+	}
+	if len(resp.Journeys) == 0 {
+		result.Status = "no_journey"
+		result.Fare = emptyTripFare(from, to, "TfL returned no journey and no fare.")
+		result.Accessibility = tripAccessibility(opts, nil)
+		result.Message = tripMessage(result)
+		return result
+	}
+	selected := journeys[0]
+	result.Selected = &selected
+	result.Fare = journeyFareQuote(tfl.JourneyResponse{Journeys: []tfl.Journey{resp.Journeys[0]}}, tfl.MatchedStop{Name: from}, tfl.MatchedStop{Name: to}, "Adult", "contactless", opts.Date, opts.Time)
+	result.Disruptions.Lines = selected.Lines
+	result.Accessibility = tripAccessibility(opts, result.Selected)
+	result.Message = tripMessage(result)
+	return result
+}
+
+func summarizeTripJourneys(journeys []tfl.Journey, limit int) []tripJourneySummary {
+	if len(journeys) == 0 {
+		return []tripJourneySummary{}
+	}
+	if limit > len(journeys) {
+		limit = len(journeys)
+	}
+	out := make([]tripJourneySummary, 0, limit)
+	for i := 0; i < limit; i++ {
+		journey := journeys[i]
+		summary := tripJourneySummary{
+			Option:          i + 1,
+			StartDateTime:   journey.StartDateTime,
+			ArrivalDateTime: journey.ArrivalDateTime,
+			DurationMinutes: journey.Duration,
+			Lines:           []tripLineSummary{},
+			Legs:            []tripLegSummary{},
+		}
+		seenLines := map[string]bool{}
+		for _, leg := range journey.Legs {
+			routeOptions := tripRouteNames(leg.RouteOptions)
+			lineName := ""
+			lineID := ""
+			if isTripLineMode(leg.Mode.Name) && len(routeOptions) > 0 {
+				lineName = routeOptions[0]
+				lineID = tripLineID(lineName)
+				for _, routeName := range routeOptions {
+					line := tripLineSummary{ID: tripLineID(routeName), Name: routeName, Mode: leg.Mode.Name}
+					key := firstNonEmptyString(line.ID, line.Name)
+					if key != "" && !seenLines[key] {
+						seenLines[key] = true
+						summary.Lines = append(summary.Lines, line)
+					}
+				}
+			}
+			instruction := strings.TrimSpace(firstNonEmptyString(leg.Instruction.Summary, leg.Instruction.Detailed))
+			summary.Legs = append(summary.Legs, tripLegSummary{
+				Mode:            leg.Mode.Name,
+				Line:            lineName,
+				LineID:          lineID,
+				RouteOptions:    routeOptions,
+				From:            leg.DeparturePoint.CommonName,
+				To:              leg.ArrivalPoint.CommonName,
+				DepartureTime:   leg.DepartureTime,
+				ArrivalTime:     leg.ArrivalTime,
+				DurationMinutes: leg.Duration,
+				Instruction:     instruction,
+			})
+		}
+		out = append(out, summary)
+	}
+	return out
+}
+
+func tripRouteNames(options []tfl.RouteOption) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, option := range options {
+		name := strings.TrimSpace(option.Name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+func isTripLineMode(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "walk", "walking", "cycle", "cycling":
+		return false
+	default:
+		return true
+	}
+}
+
+func tripLineID(name string) string {
+	key := strings.Join(strings.Fields(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(name), "&", "and"))), " ")
+	switch key {
+	case "bakerloo", "central", "circle", "district", "jubilee", "metropolitan", "northern", "piccadilly", "victoria":
+		return key
+	case "hammersmith and city":
+		return "hammersmith-city"
+	case "waterloo and city":
+		return "waterloo-city"
+	case "elizabeth", "elizabeth line":
+		return "elizabeth"
+	case "dlr":
+		return "dlr"
+	case "tram", "london trams":
+		return "tram"
+	case "london overground", "overground":
+		return "london-overground"
+	default:
+		return slugLineID(name)
+	}
+}
+
+func slugLineID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if b.Len() > 0 && !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func tripLineIDs(lines []tripLineSummary) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, line := range lines {
+		id := strings.TrimSpace(line.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+func emptyTripFare(from, to, message string) tfl.FareQuote {
+	return tfl.FareQuote{
+		Status:        "no_data",
+		Message:       message,
+		Kind:          "journey",
+		From:          from,
+		To:            to,
+		PassengerType: "Adult",
+		Payment:       "contactless",
+		Currency:      "GBP",
+		Fares:         []tfl.FareOption{},
+		Source:        "TfL Journey Planner fare",
+		Notes:         []string{"TfL Journey Planner fares can vary by route, direction, time, and service."},
+	}
+}
+
+func tripAccessibility(opts tfl.JourneyOptions, selected *tripJourneySummary) tripAccessibilityResult {
+	result := tripAccessibilityResult{
+		Status:                  "not_requested",
+		Requested:               append([]string{}, opts.AccessibilityPreferences...),
+		RouteBetweenEntrances:   opts.RouteBetweenEntrances,
+		MaxWalkingMinutes:       opts.MaxWalkingMinutes,
+		MaxTransferMinutes:      opts.MaxTransferMinutes,
+		WalkingSpeed:            opts.WalkingSpeed,
+		SelectedRequiresWalking: selectedHasWalking(selected),
+		Flags:                   []string{},
+		Notes:                   []string{},
+	}
+	if len(result.Requested) > 0 || opts.RouteBetweenEntrances || opts.MaxWalkingMinutes != "" || opts.MaxTransferMinutes != "" || opts.WalkingSpeed != "" {
+		result.Status = "requested"
+	}
+	if len(result.Requested) > 0 {
+		result.Flags = appendUniqueString(result.Flags, "accessibility_preferences_requested")
+		result.Notes = append(result.Notes, "TfL Journey Planner accessibility preferences were applied.")
+		for _, pref := range result.Requested {
+			if strings.Contains(strings.ToLower(pref), "stepfree") {
+				result.Flags = appendUniqueString(result.Flags, "step_free_requested")
+				break
+			}
+		}
+	}
+	if opts.RouteBetweenEntrances {
+		result.Flags = appendUniqueString(result.Flags, "route_between_entrances_requested")
+		result.Notes = append(result.Notes, "Station entrance/platform routing was requested.")
+	}
+	if opts.MaxWalkingMinutes != "" {
+		result.Flags = appendUniqueString(result.Flags, "max_walking_minutes_set")
+	}
+	if opts.MaxTransferMinutes != "" {
+		result.Flags = appendUniqueString(result.Flags, "max_transfer_minutes_set")
+	}
+	if result.SelectedRequiresWalking {
+		result.Flags = appendUniqueString(result.Flags, "walking_required")
+		result.Notes = append(result.Notes, "Selected journey includes at least one walking leg.")
+	}
+	if len(result.Notes) == 0 {
+		result.Notes = append(result.Notes, "No accessibility preference requested; route may include stairs, escalators, and walking transfers.")
+	}
+	return result
+}
+
+func selectedHasWalking(selected *tripJourneySummary) bool {
+	if selected == nil {
+		return false
+	}
+	for _, leg := range selected.Legs {
+		mode := strings.ToLower(strings.TrimSpace(leg.Mode))
+		if mode == "walk" || mode == "walking" {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func tripAPIStatus(err error) string {
+	var apiErr *tfl.APIError
+	if errors.As(err, &apiErr) {
+		return "api_error"
+	}
+	return "api_failed"
+}
+
+func tripMessage(result tripResult) string {
+	if result.Status == "no_journey" {
+		return fmt.Sprintf("TfL returned no journeys from %s to %s.", result.From, result.To)
+	}
+	if result.Selected == nil {
+		return result.Disruptions.Message
+	}
+	fare := "fare unavailable"
+	if result.Fare.Status == "ok" && result.Fare.AmountPence > 0 {
+		fare = "fare " + formatPounds(result.Fare.AmountPence)
+	}
+	disruption := "no line disruptions checked"
+	switch {
+	case result.Disruptions.Status == "api_error" || result.Disruptions.Status == "api_failed":
+		disruption = "disruption lookup failed"
+	case len(result.Disruptions.Active) > 0:
+		disruption = fmt.Sprintf("%d active %s on %s", len(result.Disruptions.Active), plural("disruption", len(result.Disruptions.Active)), tripLineNames(result.Disruptions.Lines))
+	case len(result.Disruptions.Lines) > 0:
+		disruption = "no active disruptions on " + tripLineNames(result.Disruptions.Lines)
+	}
+	return fmt.Sprintf("Selected option departs %s, arrives %s (%d min), %s; %s.", hhmm(result.Selected.StartDateTime), hhmm(result.Selected.ArrivalDateTime), result.Selected.DurationMinutes, fare, disruption)
+}
+
+func tripLineNames(lines []tripLineSummary) string {
+	var names []string
+	for _, line := range lines {
+		name := firstNonEmptyString(line.Name, line.ID)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return "selected lines"
+	}
+	return strings.Join(names, ",")
+}
+
+func plural(word string, n int) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
+}
+
+func writeTripResult(g globals, stdout, stderr io.Writer, result tripResult) int {
+	if g.format == output.JSON {
+		return writeJSONWithOK(g, stdout, stderr, result, result.Status == "ok", result.Status != "ok")
+	}
+	if g.format == output.Plain {
+		var rows [][]string
+		rows = append(rows, []string{"summary", result.Status, result.From, result.To, result.Message})
+		if result.Selected != nil {
+			rows = append(rows, []string{"selected", strconv.Itoa(result.Selected.Option), hhmm(result.Selected.StartDateTime), hhmm(result.Selected.ArrivalDateTime), strconv.Itoa(result.Selected.DurationMinutes), formatTripFare(result.Fare), tripLineNames(result.Selected.Lines)})
+		}
+		for _, journey := range result.Journeys {
+			rows = append(rows, []string{"journey", strconv.Itoa(journey.Option), hhmm(journey.StartDateTime), hhmm(journey.ArrivalDateTime), strconv.Itoa(journey.DurationMinutes), tripLineNames(journey.Lines)})
+			for _, leg := range journey.Legs {
+				rows = append(rows, []string{"leg", strconv.Itoa(journey.Option), leg.Mode, leg.LineID, leg.Line, hhmm(leg.DepartureTime), hhmm(leg.ArrivalTime), strconv.Itoa(leg.DurationMinutes), leg.From + " -> " + leg.To})
+			}
+		}
+		rows = append(rows, []string{"fare", result.Fare.Status, formatTripFare(result.Fare), result.Fare.Message})
+		if len(result.Disruptions.Active) == 0 {
+			rows = append(rows, []string{"disruptions", result.Disruptions.Status, strings.Join(tripLineIDs(result.Disruptions.Lines), ","), result.Disruptions.Message})
+		} else {
+			for _, d := range result.Disruptions.Active {
+				rows = append(rows, []string{"disruption", d.LineID, d.LineName, d.Category, d.Type, disruptionText(d)})
+			}
+		}
+		rows = append(rows, []string{"accessibility", result.Accessibility.Status, strings.Join(result.Accessibility.Flags, ","), strings.Join(result.Accessibility.Notes, " ")})
+		_ = output.WritePlainRows(stdout, rows)
+		return exitcode.OK
+	}
+	fmt.Fprintf(stdout, "%s -> %s\n", result.From, result.To)
+	if result.Selected == nil {
+		fmt.Fprintln(stdout, result.Message)
+		return exitcode.OK
+	}
+	fmt.Fprintf(stdout, "Selected: depart %s, arrive %s (%d min), %s\n", hhmm(result.Selected.StartDateTime), hhmm(result.Selected.ArrivalDateTime), result.Selected.DurationMinutes, formatTripFare(result.Fare))
+	for _, leg := range result.Selected.Legs {
+		line := ""
+		if leg.Line != "" {
+			line = " [" + leg.Line + "]"
+		}
+		fmt.Fprintf(stdout, "  %s %s%s: %s -> %s\n", hhmm(leg.DepartureTime), strings.ToUpper(leg.Mode), line, leg.From, leg.To)
+	}
+	if len(result.Disruptions.Active) == 0 {
+		fmt.Fprintf(stdout, "Disruptions: %s\n", result.Disruptions.Message)
+	} else {
+		fmt.Fprintln(stdout, "Disruptions:")
+		for _, d := range result.Disruptions.Active {
+			label := firstNonEmptyString(d.LineName, d.LineID, d.Category)
+			fmt.Fprintf(stdout, "  %s: %s\n", label, disruptionText(d))
+		}
+	}
+	fmt.Fprintf(stdout, "Accessibility: %s\n", strings.Join(result.Accessibility.Notes, " "))
+	if len(result.Journeys) > 1 {
+		fmt.Fprintln(stdout, "Alternatives:")
+		for _, journey := range result.Journeys[1:] {
+			fmt.Fprintf(stdout, "  Option %d: depart %s, arrive %s (%d min) via %s\n", journey.Option, hhmm(journey.StartDateTime), hhmm(journey.ArrivalDateTime), journey.DurationMinutes, tripLineNames(journey.Lines))
+		}
+	}
+	return exitcode.OK
+}
+
+func formatTripFare(fare tfl.FareQuote) string {
+	if fare.Status == "ok" && fare.AmountPence > 0 {
+		return formatPounds(fare.AmountPence)
+	}
+	return "fare unavailable"
+}
+
 func tflFares(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("fares", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -1825,6 +2349,11 @@ func tflFares(ctx context.Context, g globals, client *tfl.Client, args []string,
 		quote := tfl.FareQuote{Status: "unsupported", Message: "Station fare lookup currently supports Adult PAYG/contactless fares only.", Kind: "journey", From: *from, To: *to, PassengerType: *passenger, Currency: "GBP", Fares: []tfl.FareOption{}, Source: "TfL Journey Planner fare"}
 		return writeFareQuote(g, stdout, stderr, quote, exitcode.NoData)
 	}
+	stationPayment := canonicalFarePayment(*payment)
+	if stationPayment != "contactless" && stationPayment != "oyster" {
+		quote := tfl.FareQuote{Status: "unsupported", Message: "Station fare lookup currently supports contactless and Oyster fares only.", Kind: "journey", From: *from, To: *to, PassengerType: *passenger, Payment: stationPayment, Currency: "GBP", Fares: []tfl.FareOption{}, Source: "TfL Journey Planner fare"}
+		return writeFareQuote(g, stdout, stderr, quote, exitcode.NoData)
+	}
 	resolvedFrom := tfl.MatchedStop{Name: *from, ID: *fromID}
 	resolvedTo := tfl.MatchedStop{Name: *to, ID: *toID}
 	var err error
@@ -1848,7 +2377,7 @@ func tflFares(ctx context.Context, g globals, client *tfl.Client, args []string,
 		fmt.Fprintln(stderr, err)
 		return exitcode.Network
 	}
-	quote := journeyFareQuote(resp, resolvedFrom, resolvedTo, *passenger, *payment, *date, *when)
+	quote := journeyFareQuote(resp, resolvedFrom, resolvedTo, *passenger, stationPayment, *date, *when)
 	code := exitcode.OK
 	if quote.Status != "ok" {
 		code = exitcode.NoData
@@ -1937,7 +2466,7 @@ func zoneFareQuote(fromZone, toZone int, passenger, payment, when string) (tfl.F
 		when = "anytime"
 	}
 	minZone, maxZone := minMaxZone(fromZone, toZone)
-	quote := tfl.FareQuote{Status: "ok", Kind: "zonal", FromZone: fromZone, ToZone: toZone, Zones: inclusiveZones(fromZone, toZone), PassengerType: passenger, Payment: payment, Time: when, Currency: "GBP", Source: "TfL 2026 adult PAYG fares and caps", Notes: []string{"For exact station pairs, use tfl fares --from/--to because some fares vary by route, direction, and National Rail acceptance."}}
+	quote := tfl.FareQuote{Status: "ok", Kind: "zonal", FromZone: fromZone, ToZone: toZone, PassengerType: passenger, Payment: payment, Time: when, Currency: "GBP", Source: "TfL 2026 adult PAYG fares and caps", Notes: []string{"For exact station pairs, use tfl fares --from/--to because some fares vary by route, direction, and National Rail acceptance."}}
 	if passenger != "" && !strings.EqualFold(passenger, "Adult") {
 		quote.Status = "unsupported"
 		quote.Message = "Zonal fare lookup currently supports Adult fares only; use station fare finder for other passenger types."
@@ -1950,6 +2479,7 @@ func zoneFareQuote(fromZone, toZone int, passenger, payment, when string) (tfl.F
 		quote.Fares = []tfl.FareOption{}
 		return quote, exitcode.NoData
 	}
+	quote.Zones = inclusiveZones(fromZone, toZone)
 	var band zoneFareBand
 	if minZone == 1 {
 		band = zoneOneFareBands[maxZone]
@@ -2715,6 +3245,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  tfl arrivals --stop ID       Show live arrivals")
 	fmt.Fprintln(w, "  tfl next-arrival ...         Resolve a stop query and show the next arrival")
 	fmt.Fprintln(w, "  tfl journey --from A --to B  Plan a London journey")
+	fmt.Fprintln(w, "  tfl trip --from A --to B     Plan a trip with fare, disruptions, and access notes")
 	fmt.Fprintln(w, "  tfl fare ...                 Estimate TfL PAYG fares")
 	fmt.Fprintln(w, "  tfl watch-arrival ...        One-shot live arrival check")
 }

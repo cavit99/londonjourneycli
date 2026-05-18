@@ -32,6 +32,9 @@ commands:
   - name: journey
     description: Plan a journey with TfL.
     exec: [londonjourneycli, tfl, journey]
+  - name: trip
+    description: Plan a journey with fare, disruptions, and accessibility context.
+    exec: [londonjourneycli, tfl, trip]
   - name: fare
     description: Estimate TfL adult PAYG fares.
     exec: [londonjourneycli, tfl, fare]

@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,7 +33,9 @@ func Project(v any, path string) (any, error) {
 		return nil, err
 	}
 	var cur any
-	if err := json.Unmarshal(raw, &cur); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&cur); err != nil {
 		return nil, err
 	}
 	for _, part := range strings.Split(path, ".") {

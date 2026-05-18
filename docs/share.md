@@ -2,16 +2,17 @@
 
 LondonJourneyCLI is easiest to explain as:
 
-> Agent-ready London transport answers from a small Go CLI: journeys, live arrivals, fares, accessibility, and location-aware stop lookup.
+> Agent-ready London transport answers from a small Go CLI: trip bundles, journeys, live arrivals, fares, accessibility, and location-aware stop lookup.
 
 Short post:
 
-> Built LondonJourneyCLI: a small Go CLI that turns TfL's endpoint-shaped API into task-shaped tools for agents: journey planning, live arrivals, line status, disruptions, fares, nearby stop search, accessible station discovery, and one-shot transport checks.
+> Built LondonJourneyCLI: a small Go CLI that turns TfL's endpoint-shaped API into task-shaped tools for agents: trip bundles, journey planning, live arrivals, line status, disruptions, fares, nearby stop search, accessible station discovery, and one-shot transport checks.
 >
 > github.com/cavit99/londonjourneycli
 
 Useful demo commands:
 
+    londonjourneycli --json tfl trip --from "London Bridge" --to "Paddington"
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
     londonjourneycli --json tfl fare --from-zone 3 --to-zone 1 --period peak --payment contactless
     londonjourneycli --json tfl accessible-stations --near "Oxford Circus" --mode tube --radius 1200 --require-step-free
@@ -23,6 +24,7 @@ Useful demo commands:
 What makes it different from broader TfL wrappers:
 
 - Task-shaped commands, not just endpoint exposure.
+- One trip command bundles route summary, Journey Planner fare data, line disruptions, and accessibility flags.
 - Stop-name plus line resolution for arrivals.
 - Location-share nearby-stop lookup.
 - Route-sensitive and zonal fare answers.
