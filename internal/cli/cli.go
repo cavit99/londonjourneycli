@@ -22,7 +22,7 @@ import (
 	"github.com/cavit99/londonjourneycli/internal/tfl"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 type globals struct {
 	format     output.Format
