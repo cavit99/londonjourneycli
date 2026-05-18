@@ -4,9 +4,9 @@ LondonJourneyCLI is a small Go CLI with a narrow split of responsibilities.
 
 ## Principle
 
-The LLM owns judgement. Go owns invariants.
+The LLM owns judgement. Go owns transport mechanics.
 
-The agent decides whether a skill applies, interprets user context, and writes human-quality responses. LondonJourneyCLI validates skills, runs declared commands, and exposes deterministic outputs.
+The agent decides what the human means, resolves private context such as "home" or "office", and writes the response. LondonJourneyCLI handles the repeatable TfL mechanics: endpoint selection, parameter shape, stop resolution, parent/child fallback, fare extraction, accessibility metadata, stable statuses, and manifest execution.
 
 ## Packages
 
@@ -45,7 +45,7 @@ Time-critical watch commands:
 
 ## Why no daemon
 
-OpenClaw already has cron. launchd and systemd already exist. LondonJourneyCLI should be a sharp one-shot tool with reliable contracts, not another scheduler.
+OpenClaw already has cron. launchd and systemd already exist. LondonJourneyCLI should be a sharp one-shot tool that returns useful transport state, not another scheduler.
 
 ## Why argv arrays
 

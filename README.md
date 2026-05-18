@@ -1,23 +1,25 @@
 # londonjourneycli
 
-A small Go CLI for London journey planning, live TfL arrivals, line status, disruptions, fare lookup, nearby stop search, accessible station discovery, and agent-safe transport alerts.
+A small Go CLI that turns TfL's endpoint-shaped API into task-shaped tools for agents: plan journeys, resolve named stops, read live arrivals, price fares, find nearby stops from shared locations, discover accessible stations, and run one-shot transport checks.
 
 It also includes a narrow skill manifest runner so an agent can discover, test, and call the transport skill without relying on prose alone.
 
 ## Why this exists
 
-Agent skills tend to start as prose. That is useful, but prose alone cannot answer:
+Human transport requests are not endpoint-shaped. "Next N3 from Ildersly Grove", "what's the fare from Zone 3 to Oxford Circus?", "which stations near here have lifts?", and "tell me when the bus is nearly here" all require API choreography before an agent can give a useful answer.
 
-- Is this skill installed here?
-- Which skill owns this domain?
-- What tools or env vars does it require?
-- Can it safely run from cron?
-- What command should an agent call?
-- Did the command actually produce a user-visible outcome?
+LondonJourneyCLI packages those workflows into commands that return answer-shaped data. An agent can spend its tokens on judgement and explanation instead of repeatedly rediscovering TfL mode parameters, StopPoint IDs, parent/child stop behavior, fare caveats, and accessibility metadata.
 
-LondonJourneyCLI gives those questions a small deterministic runtime while keeping the TfL commands first-class.
+It is useful when an agent needs to:
 
-Unlike broad TfL MCP servers, this is intentionally shell-first: easy to install on a Mac mini or server, stable to call from OpenClaw/cron, and strict about visible outcomes for live transport alerts.
+- resolve a stop name plus line into the actual stop with live predictions
+- turn a WhatsApp/OpenClaw location share into nearby stops
+- find station candidates with lift/access fields without fetching heavyweight stop payloads
+- answer simple zonal fares and route-sensitive station-pair fares
+- branch on stable JSON status and exit codes
+- discover, lint, test, doctor, and run the transport skill in one local runtime
+
+Use direct TfL APIs or broad MCP servers when you want to explore the whole API surface. Use LondonJourneyCLI when you want a London transport agent to answer common transport questions with fewer tool calls and less glue code.
 
 ## Install
 
@@ -143,7 +145,7 @@ For assistant use, prefer --query when the user gave a stop name and --stop when
 
 If the JSON status is delayed and nextCheckAt is present, the caller must schedule another visible check. LondonJourneyCLI performs the one-shot check; it does not silently reschedule itself.
 
-LondonJourneyCLI does not implement its own scheduler. Use OpenClaw cron, launchd, systemd, or another scheduler to run one-shot checks. The important contract is that the check itself has a visible terminal state.
+LondonJourneyCLI does not implement its own scheduler. Use OpenClaw cron, launchd, systemd, or another scheduler to run one-shot checks. The check returns the same task-shaped state whether it sends a message or is parsed by another program.
 
 ## Skill Discovery
 
@@ -184,4 +186,4 @@ For a concise public summary and demo commands, see [docs/share.md](docs/share.m
 
 ## Scope
 
-LondonJourneyCLI stays intentionally narrow: a solid registry/runner plus a real TfL module for London journey planning, live arrivals, nearby stops, fares, accessibility lookups, line health, and visible transport alerts. More providers should earn their way in through manifests and tests, not by expanding the core until it becomes mush.
+LondonJourneyCLI stays intentionally narrow: a solid registry/runner plus a real TfL module for London journey planning, live arrivals, nearby stops, fares, accessibility lookups, line health, and transport checks. More providers should earn their way in through manifests and tests, not by expanding the core until it becomes mush.

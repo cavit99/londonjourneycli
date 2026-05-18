@@ -1,6 +1,6 @@
 # AGENTS.md - LondonJourneyCLI
 
-Use LondonJourneyCLI as the deterministic transport runtime. Agents own fuzzy intent resolution; this CLI owns TfL calls, structured output, and alert-safe terminal states.
+Use LondonJourneyCLI as the deterministic transport runtime. Agents own fuzzy intent resolution; this CLI owns TfL calls, task-shaped output, and live transport states.
 
 ## Core Pattern
 

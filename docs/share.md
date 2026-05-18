@@ -2,11 +2,11 @@
 
 LondonJourneyCLI is easiest to explain as:
 
-> Agent-safe London transport planning, fares, accessibility lookup, and live alerts from a small Go CLI.
+> Agent-ready London transport answers from a small Go CLI: journeys, live arrivals, fares, accessibility, and location-aware stop lookup.
 
 Short post:
 
-> Built LondonJourneyCLI: a small Go CLI for TfL journey planning, live arrivals, line status, disruptions, fares, nearby stop search, accessible station discovery, and one-shot transport alerts. Designed for AI assistants/OpenClaw agents, cron jobs, and scripts that need structured JSON and visible failure states.
+> Built LondonJourneyCLI: a small Go CLI that turns TfL's endpoint-shaped API into task-shaped tools for agents: journey planning, live arrivals, line status, disruptions, fares, nearby stop search, accessible station discovery, and one-shot transport checks.
 >
 > github.com/cavit99/londonjourneycli
 
@@ -22,8 +22,10 @@ Useful demo commands:
 
 What makes it different from broader TfL wrappers:
 
-- Shell-first and cron-friendly.
-- Stable JSON, optional envelope, and field projection.
-- Stop-name arrivals, fare lookup, accessible station discovery, and location-share nearby-stop lookup.
-- Explicit no-silent-failure contract for time-critical alerts.
-- OpenClaw skill manifests and docs included.
+- Task-shaped commands, not just endpoint exposure.
+- Stop-name plus line resolution for arrivals.
+- Location-share nearby-stop lookup.
+- Route-sensitive and zonal fare answers.
+- Accessible station discovery with useful lift/access fields.
+- Stable JSON, optional envelope, and field projection for agents.
+- Shell-first: works from OpenClaw, cron, local scripts, and servers without hosting an MCP process.
