@@ -13,6 +13,7 @@ Short post:
 Useful demo commands:
 
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
+    londonjourneycli --json tfl fare --from-zone 3 --to-zone 1 --period peak --payment contactless
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl arrivals --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl nearby-stops --location "📍 51.505000, -0.087000" --mode bus --limit 3

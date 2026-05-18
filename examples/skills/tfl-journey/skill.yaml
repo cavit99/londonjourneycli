@@ -5,6 +5,8 @@ triggers:
   - how do I get to
   - journey from
   - next bus
+  - fare
+  - how much
   - tfl
 safetyLevel: read-only
 cronSafe: true
@@ -27,6 +29,9 @@ commands:
   - name: journey
     description: Plan a journey with TfL.
     exec: [londonjourneycli, tfl, journey]
+  - name: fare
+    description: Estimate TfL adult PAYG fares.
+    exec: [londonjourneycli, tfl, fare]
   - name: arrivals
     description: Check live arrivals at a stop.
     exec: [londonjourneycli, tfl, arrivals]

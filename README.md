@@ -68,6 +68,8 @@ TfL examples:
     londonjourneycli --json --output 0.lineStatuses.0.statusSeverityDescription tfl status --line victoria
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
     londonjourneycli tfl journey --from "Westminster" --to "Waterloo" --preference LeastWalking --max-walking-minutes 15
+    londonjourneycli --json tfl fare --from-zone 3 --to-zone 1 --period peak --payment contactless
+    londonjourneycli --json tfl fare --from "Tottenham Hale Underground Station" --to "Oxford Circus Underground Station" --date 20260519 --time 0800 --mode tube
     londonjourneycli --json tfl arrivals --stop 490000235N --line 43
     londonjourneycli --json tfl arrivals --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3

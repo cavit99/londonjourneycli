@@ -37,6 +37,7 @@ TfL:
 - londonjourneycli tfl arrivals --stop <id> [--line N] [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--limit N]
 - londonjourneycli tfl next-arrival (--stop <id>|--query <stop name>) --line <line> [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--mode bus|all|modes] [--search-limit N] [--limit N]
 - londonjourneycli tfl journey --from <origin> --to <destination> [--date YYYYMMDD] [--time HHmm] [--arriving] [--via point] [--preference LeastTime|LeastInterchange|LeastWalking] [--mode modes] [--accessibility prefs] [--max-walking-minutes N] [--walking-speed Slow|Average|Fast] [--real-time]
+- londonjourneycli tfl fare (--from <station> --to <station> | --from-zone N --to-zone N) [--date YYYYMMDD] [--time HHmm] [--period peak|off-peak|anytime] [--payment contactless|oyster|cash] [--mode modes]
 - londonjourneycli tfl watch-arrival (--stop <id>|--query <stop name>) --line <line> [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--mode bus|all|modes] [--search-limit N] [--threshold 2m] [--openclaw-channel whatsapp --openclaw-target <target>]
 
 watch-arrival requires --threshold > 0. In --no-input mode, it also requires complete OpenClaw delivery flags or --dry-run.
