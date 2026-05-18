@@ -2,6 +2,14 @@
 
 LondonJourneyCLI includes a small TfL client for London journey planning and live arrivals.
 
+## Line Status and Disruptions
+
+    londonjourneycli tfl status
+    londonjourneycli tfl status --line victoria
+    londonjourneycli --json tfl disruptions --mode tube,dlr,elizabeth-line,overground,tram
+
+The default mode set is tube, DLR, Elizabeth line, Overground, and tram. Use --line for specific line IDs or --mode for a comma-separated mode set.
+
 ## Journey Planning
 
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"

@@ -12,6 +12,12 @@ requires:
   bins:
     - londonjourneycli
 commands:
+  - name: status
+    description: Check live TfL line status.
+    exec: [londonjourneycli, tfl, status]
+  - name: disruptions
+    description: Check active TfL disruptions.
+    exec: [londonjourneycli, tfl, disruptions]
   - name: journey
     description: Plan a journey with TfL.
     exec: [londonjourneycli, tfl, journey]

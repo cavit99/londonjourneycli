@@ -1,6 +1,6 @@
 # londonjourneycli
 
-A small Go CLI for London journey planning, live TfL arrivals, and agent-safe transport alerts.
+A small Go CLI for London journey planning, live TfL arrivals, line status, disruptions, and agent-safe transport alerts.
 
 It also includes a narrow skill manifest runner so an agent can discover, test, and call the transport skill without relying on prose alone.
 
@@ -16,6 +16,8 @@ Agent skills tend to start as prose. That is useful, but prose alone cannot answ
 - Did the command actually produce a user-visible outcome?
 
 LondonJourneyCLI gives those questions a small deterministic runtime while keeping the TfL commands first-class.
+
+Unlike broad TfL MCP servers, this is intentionally shell-first: easy to install on a Mac mini or server, stable to call from OpenClaw/cron, and strict about visible outcomes for live transport alerts.
 
 ## Install
 
@@ -58,6 +60,9 @@ TfL examples:
     londonjourneycli tfl stop-search "London Bridge"
     londonjourneycli tfl stop-search "Ildersly Grove" --mode bus --line N3
     londonjourneycli --json tfl stop-info --stop 490G00008459
+    londonjourneycli tfl status --line victoria
+    londonjourneycli --json tfl disruptions --mode tube,dlr,elizabeth-line,overground,tram
+    londonjourneycli --json --output 0.lineStatuses.0.statusSeverityDescription tfl status --line victoria
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
     londonjourneycli tfl journey --from "Westminster" --to "Waterloo" --preference LeastWalking --max-walking-minutes 15
     londonjourneycli --json tfl arrivals --stop 490000235N --line 43
@@ -95,6 +100,7 @@ Commands and tests are argv arrays, not shell strings. That is deliberate: no qu
 - stdout is data.
 - stderr is diagnostics.
 - --json is stable and intended for agents.
+- --output <path> projects JSON output by dot path; pass it before the command, for example --json --output 0.name.
 - --plain is tab-separated and scriptable for LondonJourneyCLI-owned output.
 - --no-input declares unattended use and exports LONDONJOURNEYCLI_NO_INPUT=1 to manifest commands.
 - command execution receives no interactive stdin by default.

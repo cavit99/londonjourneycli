@@ -7,6 +7,7 @@
 ## Global Flags
 
 - --json stable JSON output
+- --output <path> project JSON output by dot path; requires --json and must appear before the command
 - --plain stable tab-separated output for LondonJourneyCLI-owned output
 - --skills-dir <dir> skill root override
 - --timeout <duration> command timeout, default 30s
@@ -26,6 +27,8 @@ Registry:
 
 TfL:
 
+- londonjourneycli tfl status [--line line-ids] [--mode modes]
+- londonjourneycli tfl disruptions [--line line-ids] [--mode modes]
 - londonjourneycli tfl stop-search <query> [--mode modes] [--line lines] [--max-results N] [--include-hubs] [--limit N]
 - londonjourneycli tfl stop-info --stop <id>
 - londonjourneycli tfl arrivals --stop <id> [--line N] [--towards text] [--direction inbound|outbound|all] [--destination-stop id] [--limit N]
@@ -68,6 +71,10 @@ Default roots are:
 Pass --skills-dir <dir> to use exactly one root for a command.
 
 JSON list/show responses include local skill paths. This is useful for agents but may reveal absolute paths in logs.
+
+Use --output when a caller needs one JSON field rather than the full object, for example:
+
+    londonjourneycli --json --output 0.lineStatuses.0.statusSeverityDescription tfl status --line victoria
 
 ## Manifest Command Execution
 

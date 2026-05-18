@@ -49,6 +49,8 @@ func TestRunMetaUsageAndGlobalParsing(t *testing.T) {
 		{name: "version", args: []string{"version"}, code: exitcode.OK, want: version},
 		{name: "unknown", args: []string{"bogus"}, code: exitcode.Usage, want: "unknown command"},
 		{name: "missing skills dir", args: []string{"--skills-dir"}, code: exitcode.Usage, want: "--skills-dir requires a value"},
+		{name: "missing output", args: []string{"--output"}, code: exitcode.Usage, want: "--output requires a value"},
+		{name: "output without json", args: []string{"--output=status", "version"}, code: exitcode.Usage, want: "--output requires --json"},
 		{name: "missing timeout", args: []string{"--timeout"}, code: exitcode.Usage, want: "--timeout requires a duration"},
 		{name: "bad timeout", args: []string{"--timeout=not-a-duration", "list"}, code: exitcode.Usage, want: "invalid duration"},
 		{name: "tfl usage", args: []string{"tfl"}, code: exitcode.Usage, want: "usage: londonjourneycli tfl"},
@@ -186,8 +188,8 @@ func TestWriteNextArrivalResultFormats(t *testing.T) {
 		{name: "json", format: output.JSON, want: "\"status\": \"ok\""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var out bytes.Buffer
-			writeNextArrivalResult(globals{format: tc.format}, &out, result)
+			var out, errb bytes.Buffer
+			writeNextArrivalResult(globals{format: tc.format}, &out, &errb, result)
 			if !strings.Contains(out.String(), tc.want) {
 				t.Fatalf("expected %q in %q", tc.want, out.String())
 			}

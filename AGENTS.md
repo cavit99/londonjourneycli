@@ -29,6 +29,7 @@ Agent rule: do not paste the raw ambiguity list to the user unless needed. Pick 
 ## Status Handling
 
 - `tfl journey`: success returns `journeys[]`; `ambiguous` means resolve place and retry.
+- `tfl status` / `tfl disruptions`: use before or after journey planning when the user cares about reliability, delays, or whether a route is likely to work.
 - `tfl next-arrival`: `ok` has `next`; `no_data` means the stop resolved but no matching prediction; `stop_not_found` means the stop query itself failed.
 - `tfl watch-arrival`: `due`, `delayed`, `no_data`, `stop_not_found`, and `api_failed` are all user-visible terminal states when delivery is configured.
 

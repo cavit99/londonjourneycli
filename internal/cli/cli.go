@@ -22,20 +22,25 @@ import (
 	"github.com/cavit99/londonjourneycli/internal/tfl"
 )
 
-const version = "0.1.2"
+const version = "0.2.0"
 
 type globals struct {
-	format    output.Format
-	skillsDir string
-	timeout   time.Duration
-	noInput   bool
-	verbose   bool
+	format     output.Format
+	outputPath string
+	skillsDir  string
+	timeout    time.Duration
+	noInput    bool
+	verbose    bool
 }
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	g, rest, err := parseGlobals(args)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
+		return exitcode.Usage
+	}
+	if g.outputPath != "" && g.format != output.JSON {
+		fmt.Fprintln(stderr, "--output requires --json")
 		return exitcode.Usage
 	}
 	if g.timeout > 0 {
@@ -86,6 +91,12 @@ func parseGlobals(args []string) (globals, []string, error) {
 			g.format = output.Plain
 		case "--no-input":
 			g.noInput = true
+		case "--output":
+			i++
+			if i >= len(args) {
+				return g, nil, errors.New("--output requires a value")
+			}
+			g.outputPath = args[i]
 		case "-v", "--verbose":
 			g.verbose = true
 		case "--skills-dir":
@@ -115,6 +126,10 @@ func parseGlobals(args []string) (globals, []string, error) {
 					return g, nil, err
 				}
 				g.timeout = d
+				continue
+			}
+			if strings.HasPrefix(arg, "--output=") {
+				g.outputPath = strings.TrimPrefix(arg, "--output=")
 				continue
 			}
 			return g, args[i:], nil
@@ -148,6 +163,37 @@ func discover(g globals) ([]skill.Skill, error) {
 	return skill.Discover(skillRoots(g))
 }
 
+func writeJSON(g globals, stdout, stderr io.Writer, value any) int {
+	return writeJSONWithProjection(g, stdout, stderr, value, false)
+}
+
+func writeJSONPreservingPayload(g globals, stdout, stderr io.Writer, value any) int {
+	return writeJSONWithProjection(g, stdout, stderr, value, true)
+}
+
+func writeJSONWithProjection(g globals, stdout, stderr io.Writer, value any, preserveOnProjectionError bool) int {
+	if g.outputPath != "" {
+		projected, err := output.Project(value, g.outputPath)
+		if err != nil {
+			if preserveOnProjectionError {
+				if err := output.WriteJSON(stdout, value); err != nil {
+					fmt.Fprintln(stderr, err)
+					return exitcode.Generic
+				}
+				return exitcode.OK
+			}
+			fmt.Fprintln(stderr, err)
+			return exitcode.NoData
+		}
+		value = projected
+	}
+	if err := output.WriteJSON(stdout, value); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitcode.Generic
+	}
+	return exitcode.OK
+}
+
 func cmdList(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
 	skills, err := discover(g)
 	if err != nil {
@@ -156,7 +202,7 @@ func cmdList(ctx context.Context, g globals, args []string, stdout, stderr io.Wr
 	}
 	switch g.format {
 	case output.JSON:
-		_ = output.WriteJSON(stdout, skills)
+		return writeJSON(g, stdout, stderr, skills)
 	case output.Plain:
 		var rows [][]string
 		for _, s := range skills {
@@ -193,8 +239,7 @@ func cmdSearch(ctx context.Context, g globals, args []string, stdout, stderr io.
 		}
 	}
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, matches)
-		return exitcode.OK
+		return writeJSON(g, stdout, stderr, matches)
 	}
 	if g.format == output.Plain {
 		var rows [][]string
@@ -226,8 +271,7 @@ func cmdShow(ctx context.Context, g globals, args []string, stdout, stderr io.Wr
 		return exitcode.NoData
 	}
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, s)
-		return exitcode.OK
+		return writeJSON(g, stdout, stderr, s)
 	}
 	if g.format == output.Plain {
 		owner := ""
@@ -254,7 +298,9 @@ func cmdLint(ctx context.Context, g globals, args []string, stdout, stderr io.Wr
 	}
 	issues := skill.Lint(skills)
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, issues)
+		if code := writeJSON(g, stdout, stderr, issues); code != exitcode.OK {
+			return code
+		}
 	} else if g.format == output.Plain {
 		var rows [][]string
 		for _, issue := range issues {
@@ -293,7 +339,9 @@ func cmdDoctor(ctx context.Context, g globals, args []string, stdout, stderr io.
 	}
 	checks := skill.Doctor(s)
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, checks)
+		if code := writeJSON(g, stdout, stderr, checks); code != exitcode.OK {
+			return code
+		}
 	} else {
 		for _, c := range checks {
 			status := "ok"
@@ -389,7 +437,9 @@ func cmdTest(ctx context.Context, g globals, args []string, stdout, stderr io.Wr
 			_ = output.WritePlainRows(stdout, rows)
 			return status
 		}
-		_ = output.WriteJSON(stdout, results)
+		if code := writeJSON(g, stdout, stderr, results); code != exitcode.OK {
+			return code
+		}
 		return status
 	}
 	for _, tc := range s.Manifest.Tests {
@@ -476,7 +526,7 @@ func runArgvWithIO(ctx context.Context, argv []string, opts runOptions, stdout, 
 
 func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <stop-search|stop-info|arrivals|next-arrival|journey|watch-arrival>")
+		fmt.Fprintln(stderr, "usage: londonjourneycli tfl <status|disruptions|stop-search|stop-info|arrivals|next-arrival|journey|watch-arrival>")
 		return exitcode.Usage
 	}
 	client := tfl.NewClient(os.Getenv("TFL_APP_KEY"))
@@ -484,6 +534,10 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 		client.BaseURL = base
 	}
 	switch args[0] {
+	case "status":
+		return tflStatus(ctx, g, client, args[1:], stdout, stderr)
+	case "disruptions":
+		return tflDisruptions(ctx, g, client, args[1:], stdout, stderr)
 	case "stop-search":
 		return tflStopSearch(ctx, g, client, args[1:], stdout, stderr)
 	case "stop-info":
@@ -500,6 +554,99 @@ func cmdTFL(ctx context.Context, g globals, args []string, stdout, stderr io.Wri
 		fmt.Fprintf(stderr, "unknown tfl command %q\n", args[0])
 		return exitcode.Usage
 	}
+}
+
+func tflStatus(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	line := fs.String("line", "", "comma-separated TfL line IDs")
+	mode := fs.String("mode", "", "comma-separated modes; default tube,dlr,elizabeth-line,overground,tram")
+	if err := fs.Parse(args); err != nil {
+		return exitcode.Usage
+	}
+	statuses, err := client.LineStatus(ctx, csvArgs(*line), csvArgs(*mode))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitcode.Network
+	}
+	if statuses == nil {
+		statuses = []tfl.LineStatus{}
+	}
+	if g.format == output.JSON {
+		return writeJSON(g, stdout, stderr, statuses)
+	}
+	if g.format == output.Plain {
+		var rows [][]string
+		for _, statusLine := range statuses {
+			if len(statusLine.LineStatuses) == 0 {
+				rows = append(rows, []string{statusLine.ID, statusLine.Name, statusLine.ModeName, "", "", ""})
+				continue
+			}
+			for _, status := range statusLine.LineStatuses {
+				rows = append(rows, []string{statusLine.ID, statusLine.Name, statusLine.ModeName, strconv.Itoa(status.StatusSeverity), status.StatusSeverityDescription, status.Reason})
+			}
+		}
+		_ = output.WritePlainRows(stdout, rows)
+		return exitcode.OK
+	}
+	for _, statusLine := range statuses {
+		if len(statusLine.LineStatuses) == 0 {
+			fmt.Fprintf(stdout, "%s: status unavailable\n", statusLine.Name)
+			continue
+		}
+		for _, status := range statusLine.LineStatuses {
+			fmt.Fprintf(stdout, "%s: %s", statusLine.Name, status.StatusSeverityDescription)
+			if status.Reason != "" {
+				fmt.Fprintf(stdout, " - %s", status.Reason)
+			}
+			fmt.Fprintln(stdout)
+		}
+	}
+	return exitcode.OK
+}
+
+func tflDisruptions(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("disruptions", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	line := fs.String("line", "", "comma-separated TfL line IDs")
+	mode := fs.String("mode", "", "comma-separated modes; default tube,dlr,elizabeth-line,overground,tram")
+	if err := fs.Parse(args); err != nil {
+		return exitcode.Usage
+	}
+	disruptions, err := client.LineDisruptions(ctx, csvArgs(*line), csvArgs(*mode))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitcode.Network
+	}
+	if disruptions == nil {
+		disruptions = []tfl.Disruption{}
+	}
+	if g.format == output.JSON {
+		return writeJSON(g, stdout, stderr, disruptions)
+	}
+	if g.format == output.Plain {
+		var rows [][]string
+		for _, d := range disruptions {
+			rows = append(rows, []string{d.LineID, d.LineName, d.Category, d.Type, disruptionText(d)})
+		}
+		_ = output.WritePlainRows(stdout, rows)
+		return exitcode.OK
+	}
+	if len(disruptions) == 0 {
+		fmt.Fprintln(stdout, "No active disruptions found.")
+		return exitcode.OK
+	}
+	for _, d := range disruptions {
+		label := d.LineName
+		if label == "" {
+			label = d.LineID
+		}
+		if label == "" {
+			label = d.Category
+		}
+		fmt.Fprintf(stdout, "%s: %s\n", label, disruptionText(d))
+	}
+	return exitcode.OK
 }
 
 func tflStopInfo(ctx context.Context, g globals, client *tfl.Client, args []string, stdout, stderr io.Writer) int {
@@ -519,8 +666,7 @@ func tflStopInfo(ctx context.Context, g globals, client *tfl.Client, args []stri
 		return exitcode.Network
 	}
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, info)
-		return exitcode.OK
+		return writeJSON(g, stdout, stderr, info)
 	}
 	if g.format == output.Plain {
 		rows := [][]string{{info.ID, info.CommonName, info.Indicator, info.StopLetter, fmt.Sprintf("%.5f", info.Lat), fmt.Sprintf("%.5f", info.Lon), strings.Join(info.Modes, ",")}}
@@ -600,8 +746,7 @@ func tflStopSearch(ctx context.Context, g globals, client *tfl.Client, args []st
 		resp.Matches = resp.Matches[:limit]
 	}
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, resp)
-		return exitcode.OK
+		return writeJSON(g, stdout, stderr, resp)
 	}
 	for _, m := range resp.Matches {
 		fmt.Fprintf(stdout, "%s\t%s\t%.5f\t%.5f\n", m.ID, m.Name, m.Lat, m.Lon)
@@ -639,8 +784,7 @@ func tflArrivals(ctx context.Context, g globals, client *tfl.Client, args []stri
 		arrivals = arrivals[:*limit]
 	}
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, arrivals)
-		return exitcode.OK
+		return writeJSON(g, stdout, stderr, arrivals)
 	}
 	for _, a := range arrivals {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\t%d min\t%s\n", a.LineName, a.DestinationName, a.PlatformName, roundMinutes(a.TimeToStation), a.ExpectedArrival.Local().Format("15:04"))
@@ -690,9 +834,8 @@ func writeStructuredTfLError(g globals, stdout, stderr io.Writer, err error) (in
 		message = "TfL needs a more specific place. Resolve the origin, destination, or via point to a postcode, station/stop ID, coordinates, or exact address, then retry."
 		code = exitcode.Usage
 	}
-	if writeErr := output.WriteJSON(stdout, tflErrorResult{Status: status, Message: message, Error: apiErr}); writeErr != nil {
-		fmt.Fprintln(stderr, writeErr)
-		return exitcode.Generic, true
+	if writeCode := writeJSONPreservingPayload(g, stdout, stderr, tflErrorResult{Status: status, Message: message, Error: apiErr}); writeCode != exitcode.OK {
+		return writeCode, true
 	}
 	return code, true
 }
@@ -765,7 +908,9 @@ func tflNextArrival(ctx context.Context, g globals, client *tfl.Client, args []s
 	if !found.StopFound {
 		result.Status = "stop_not_found"
 		result.Message = fmt.Sprintf("TfL found no stop matching %q.", *query)
-		writeNextArrivalResult(g, stdout, result)
+		if code := writeNextArrivalResult(g, stdout, stderr, result); code != exitcode.OK {
+			return code
+		}
 		return exitcode.NoData
 	}
 	stopLabel := "selected stop"
@@ -781,14 +926,18 @@ func tflNextArrival(ctx context.Context, g globals, client *tfl.Client, args []s
 		} else {
 			result.Message = fmt.Sprintf("TfL shows no matching %s arrivals from %s.", *line, stopLabel)
 		}
-		writeNextArrivalResult(g, stdout, result)
+		if code := writeNextArrivalResult(g, stdout, stderr, result); code != exitcode.OK {
+			return code
+		}
 		return exitcode.NoData
 	}
 	next := arrivals[0]
 	result.Status = "ok"
 	result.Next = &next
 	result.Message = fmt.Sprintf("Next %s from %s is about %d min away towards %s.", next.LineName, stopLabel, roundMinutes(next.TimeToStation), next.DestinationName)
-	writeNextArrivalResult(g, stdout, result)
+	if code := writeNextArrivalResult(g, stdout, stderr, result); code != exitcode.OK {
+		return code
+	}
 	return exitcode.OK
 }
 
@@ -848,8 +997,7 @@ func tflJourney(ctx context.Context, g globals, client *tfl.Client, args []strin
 		return tflErrorExitCode(err)
 	}
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, resp)
-		return exitcode.OK
+		return writeJSON(g, stdout, stderr, resp)
 	}
 	if g.format == output.Plain {
 		var rows [][]string
@@ -953,22 +1101,26 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 		msg := fmt.Sprintf("Live transport check failed: %v", err)
 		notificationOK, sendErr := sendWatchNotification(ctx, sender, msg)
 		if sendErr != nil {
-			writeWatchResult(g, stdout, watchResult{Status: "api_failed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: false, NotificationError: sendErr.Error()})
+			_ = writeWatchResult(g, stdout, stderr, watchResult{Status: "api_failed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: false, NotificationError: sendErr.Error()})
 			fmt.Fprintln(stderr, sendErr)
 			return exitcode.Generic
 		}
-		writeWatchResult(g, stdout, watchResult{Status: "api_failed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: notificationOK})
+		if code := writeWatchResult(g, stdout, stderr, watchResult{Status: "api_failed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: notificationOK}); code != exitcode.OK {
+			return code
+		}
 		return exitcode.Network
 	}
 	if !found.StopFound {
 		msg := fmt.Sprintf("Live transport update: TfL found no stop matching %q.", *query)
 		notificationOK, err := sendWatchNotification(ctx, sender, msg)
 		if err != nil {
-			writeWatchResult(g, stdout, watchResult{Status: "stop_not_found", Message: msg, Query: found.Query, Candidates: found.Candidates, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
+			_ = writeWatchResult(g, stdout, stderr, watchResult{Status: "stop_not_found", Message: msg, Query: found.Query, Candidates: found.Candidates, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
 			fmt.Fprintln(stderr, err)
 			return exitcode.Generic
 		}
-		writeWatchResult(g, stdout, watchResult{Status: "stop_not_found", Message: msg, Query: found.Query, Candidates: found.Candidates, Notification: msg, NotificationOK: notificationOK})
+		if code := writeWatchResult(g, stdout, stderr, watchResult{Status: "stop_not_found", Message: msg, Query: found.Query, Candidates: found.Candidates, Notification: msg, NotificationOK: notificationOK}); code != exitcode.OK {
+			return code
+		}
 		return exitcode.NoData
 	}
 	arrivals := found.Arrivals
@@ -980,11 +1132,13 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 		}
 		notificationOK, err := sendWatchNotification(ctx, sender, msg)
 		if err != nil {
-			writeWatchResult(g, stdout, watchResult{Status: "no_data", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
+			_ = writeWatchResult(g, stdout, stderr, watchResult{Status: "no_data", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
 			fmt.Fprintln(stderr, err)
 			return exitcode.Generic
 		}
-		writeWatchResult(g, stdout, watchResult{Status: "no_data", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: notificationOK})
+		if code := writeWatchResult(g, stdout, stderr, watchResult{Status: "no_data", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Notification: msg, NotificationOK: notificationOK}); code != exitcode.OK {
+			return code
+		}
 		return exitcode.NoData
 	}
 
@@ -994,11 +1148,13 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 		msg := fmt.Sprintf("Transport heads-up: live TfL says the %s is about %d min away from %s.", next.LineName, roundMinutes(next.TimeToStation), next.StationName)
 		notificationOK, err := sendWatchNotification(ctx, sender, msg)
 		if err != nil {
-			writeWatchResult(g, stdout, watchResult{Status: "due", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
+			_ = writeWatchResult(g, stdout, stderr, watchResult{Status: "due", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, Notification: msg, NotificationOK: false, NotificationError: err.Error()})
 			fmt.Fprintln(stderr, err)
 			return exitcode.Generic
 		}
-		writeWatchResult(g, stdout, watchResult{Status: "due", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, Notification: msg, NotificationOK: notificationOK})
+		if code := writeWatchResult(g, stdout, stderr, watchResult{Status: "due", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, Notification: msg, NotificationOK: notificationOK}); code != exitcode.OK {
+			return code
+		}
 		return exitcode.OK
 	}
 
@@ -1006,11 +1162,13 @@ func tflWatchArrival(ctx context.Context, g globals, client *tfl.Client, args []
 	msg := fmt.Sprintf("Transport update: live TfL says the %s has slipped to %s, about %d min away. Check again around %s.", next.LineName, next.ExpectedArrival.Local().Format("15:04"), roundMinutes(next.TimeToStation), nextCheck.Local().Format("15:04"))
 	notificationOK, err := sendWatchNotification(ctx, sender, msg)
 	if err != nil {
-		writeWatchResult(g, stdout, watchResult{Status: "delayed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, NextCheckAt: nextCheck.Format(time.RFC3339), Notification: msg, NotificationOK: false, NotificationError: err.Error()})
+		_ = writeWatchResult(g, stdout, stderr, watchResult{Status: "delayed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, NextCheckAt: nextCheck.Format(time.RFC3339), Notification: msg, NotificationOK: false, NotificationError: err.Error()})
 		fmt.Fprintln(stderr, err)
 		return exitcode.Generic
 	}
-	writeWatchResult(g, stdout, watchResult{Status: "delayed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, NextCheckAt: nextCheck.Format(time.RFC3339), Notification: msg, NotificationOK: notificationOK})
+	if code := writeWatchResult(g, stdout, stderr, watchResult{Status: "delayed", Message: msg, Query: found.Query, Candidates: found.Candidates, ResolvedStop: found.Stop, Arrival: &next, NextCheckAt: nextCheck.Format(time.RFC3339), Notification: msg, NotificationOK: notificationOK}); code != exitcode.OK {
+		return code
+	}
 	return exitcode.OK
 }
 
@@ -1111,10 +1269,21 @@ func resolvedStopLabel(stop *resolvedStop, fallback string) string {
 	return fallback
 }
 
-func writeNextArrivalResult(g globals, stdout io.Writer, result nextArrivalResult) {
+func disruptionText(d tfl.Disruption) string {
+	for _, value := range []string{d.Description, d.Summary, d.ClosureText, d.Type, d.Category} {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return "Disruption reported"
+}
+
+func writeNextArrivalResult(g globals, stdout, stderr io.Writer, result nextArrivalResult) int {
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, result)
-		return
+		if result.Status != "ok" {
+			return writeJSONPreservingPayload(g, stdout, stderr, result)
+		}
+		return writeJSON(g, stdout, stderr, result)
 	}
 	if g.format == output.Plain {
 		stopID := ""
@@ -1147,9 +1316,10 @@ func writeNextArrivalResult(g globals, stdout io.Writer, result nextArrivalResul
 			nextTime,
 			nextSeconds,
 		}})
-		return
+		return exitcode.OK
 	}
 	fmt.Fprintln(stdout, result.Message)
+	return exitcode.OK
 }
 
 func sendWatchNotification(ctx context.Context, sender notify.OpenClaw, message string) (bool, error) {
@@ -1170,10 +1340,12 @@ func validateWatchDelivery(g globals, sender notify.OpenClaw) error {
 	return nil
 }
 
-func writeWatchResult(g globals, stdout io.Writer, result watchResult) {
+func writeWatchResult(g globals, stdout, stderr io.Writer, result watchResult) int {
 	if g.format == output.JSON {
-		_ = output.WriteJSON(stdout, result)
-		return
+		if result.Status != "due" {
+			return writeJSONPreservingPayload(g, stdout, stderr, result)
+		}
+		return writeJSON(g, stdout, stderr, result)
 	}
 	if g.format == output.Plain {
 		arrivalLine := ""
@@ -1201,9 +1373,10 @@ func writeWatchResult(g globals, stdout io.Writer, result watchResult) {
 			arrivalTime,
 			arrivalSeconds,
 		}})
-		return
+		return exitcode.OK
 	}
 	fmt.Fprintln(stdout, result.Message)
+	return exitcode.OK
 }
 
 func roundMinutes(seconds int) int {
@@ -1302,6 +1475,8 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  doctor <skill>               Check local requirements")
 	fmt.Fprintln(w, "  run <skill> <command>        Run a manifest command")
 	fmt.Fprintln(w, "  test <skill>                 Run manifest tests")
+	fmt.Fprintln(w, "  tfl status [--line ID]       Show live TfL line status")
+	fmt.Fprintln(w, "  tfl disruptions [--line ID]  Show active TfL disruptions")
 	fmt.Fprintln(w, "  tfl stop-search <query>      Search TfL stops and stations")
 	fmt.Fprintln(w, "  tfl stop-info --stop ID      Show a stop point and child stops")
 	fmt.Fprintln(w, "  tfl arrivals --stop ID       Show live arrivals")

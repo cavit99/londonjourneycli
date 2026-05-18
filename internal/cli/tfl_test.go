@@ -14,6 +14,12 @@ import (
 
 func TestTFLCommandsWithFakeServer(t *testing.T) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/Line/Mode/tube,dlr,elizabeth-line,overground,tram/Status", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[{\"id\":\"victoria\",\"name\":\"Victoria\",\"modeName\":\"tube\",\"lineStatuses\":[{\"statusSeverity\":10,\"statusSeverityDescription\":\"Good Service\"}]}]"))
+	})
+	mux.HandleFunc("/Line/victoria/Status", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[{\"id\":\"victoria\",\"name\":\"Victoria\",\"modeName\":\"tube\",\"lineStatuses\":[{\"statusSeverity\":6,\"statusSeverityDescription\":\"Severe Delays\",\"disruption\":{\"category\":\"RealTime\",\"type\":\"lineInfo\",\"description\":\"Minor platform crowding\",\"closureText\":\"minorDelays\"}}]}]"))
+	})
 	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("{\"Query\":\"London Bridge\",\"Total\":1,\"Matches\":[{\"ID\":\"490000139R\",\"Name\":\"London Bridge Station\",\"Lat\":51.5,\"Lon\":-0.08,\"Modes\":[\"bus\"]}]}"))
 	})
@@ -44,8 +50,17 @@ func TestTFLCommandsWithFakeServer(t *testing.T) {
 		want string
 		code int
 	}{
+		{name: "status", args: []string{"--json", "tfl", "status"}, want: "Good Service", code: exitcode.OK},
+		{name: "status plain", args: []string{"--plain", "tfl", "status"}, want: "victoria\tVictoria\ttube\t10\tGood Service", code: exitcode.OK},
+		{name: "status output projection", args: []string{"--json", "--output", "0.lineStatuses.0.statusSeverityDescription", "tfl", "status"}, want: "\"Good Service\"", code: exitcode.OK},
+		{name: "status output missing path", args: []string{"--json", "--output", "0.nope", "tfl", "status"}, want: "output path", code: exitcode.NoData},
+		{name: "status line", args: []string{"--json", "tfl", "status", "--line", "victoria"}, want: "Severe Delays", code: exitcode.OK},
+		{name: "disruptions", args: []string{"--plain", "tfl", "disruptions", "--line", "victoria"}, want: "victoria\tVictoria\tRealTime\tlineInfo\tMinor platform crowding", code: exitcode.OK},
+		{name: "disruptions empty json", args: []string{"--json", "tfl", "disruptions"}, want: "[]", code: exitcode.OK},
+		{name: "disruptions empty human", args: []string{"tfl", "disruptions"}, want: "No active disruptions found.", code: exitcode.OK},
 		{name: "search", args: []string{"--json", "tfl", "stop-search", "London Bridge", "--limit", "1"}, want: "London Bridge Station", code: exitcode.OK},
 		{name: "stop-info", args: []string{"--json", "tfl", "stop-info", "--stop", "490G00008459"}, want: "490008459S", code: exitcode.OK},
+		{name: "stop-info output projection", args: []string{"--json", "--output", "id", "tfl", "stop-info", "--stop", "490G00008459"}, want: "\"490G00008459\"", code: exitcode.OK},
 		{name: "arrivals", args: []string{"tfl", "arrivals", "--stop", "490000139R", "--line", "43"}, want: "Friern Barnet", code: exitcode.OK},
 		{name: "next arrival query", args: []string{"--json", "tfl", "next-arrival", "--query", "London Bridge", "--line", "43"}, want: "\"resolvedStop\": {", code: exitcode.OK},
 		{name: "journey", args: []string{"tfl", "journey", "--from", "London Bridge", "--to", "Paddington"}, want: "Option 1", code: exitcode.OK},
@@ -368,7 +383,7 @@ func TestTFLJourneyAmbiguityJSON(t *testing.T) {
 	mux.HandleFunc("/Journey/JourneyResults/1000139/to/Highgate", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMultipleChoices)
-		_, _ = w.Write([]byte(`{"toLocationDisambiguation":{"matchStatus":"list","disambiguationOptions":[{"parameterValue":"1000109","uri":"/journey/journeyresults/se192xe/to/1000109","place":{"commonName":"Highgate (London), Highgate","placeType":"StopPoint","naptanId":"490000109S","icsCode":"1000109","modes":["tube","bus"],"lat":51.5777,"lon":-0.1457},"matchQuality":1000}]},"fromLocationDisambiguation":{"matchStatus":"identified"},"journeyVector":{"from":"SE192XE","to":"Highgate"}}`))
+		_, _ = w.Write([]byte(`{"toLocationDisambiguation":{"matchStatus":"list","disambiguationOptions":[{"parameterValue":"1000109","uri":"/journey/journeyresults/1000139/to/1000109","place":{"commonName":"Highgate (London), Highgate","placeType":"StopPoint","naptanId":"490000109S","icsCode":"1000109","modes":["tube","bus"],"lat":51.5777,"lon":-0.1457},"matchQuality":1000}]},"fromLocationDisambiguation":{"matchStatus":"identified"},"journeyVector":{"from":"1000139","to":"Highgate"}}`))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -388,6 +403,15 @@ func TestTFLJourneyAmbiguityJSON(t *testing.T) {
 		t.Fatalf("expected empty stderr for JSON ambiguity, got %s", errb.String())
 	}
 
+	out.Reset()
+	errb.Reset()
+	code = Run(context.Background(), []string{"--json", "--output", "journeys.0.duration", "tfl", "journey", "--from", "London Bridge", "--to", "Highgate"}, &out, &errb)
+	if code != exitcode.Usage {
+		t.Fatalf("output ambiguity code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), `"status": "ambiguous"`) || strings.TrimSpace(errb.String()) != "" {
+		t.Fatalf("expected full structured ambiguity despite projection miss, stdout=%s stderr=%s", out.String(), errb.String())
+	}
 	out.Reset()
 	errb.Reset()
 	code = Run(context.Background(), []string{"tfl", "journey", "--from", "London Bridge", "--to", "Highgate"}, &out, &errb)

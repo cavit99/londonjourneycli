@@ -62,6 +62,31 @@ type Arrival struct {
 	VehicleID       string    `json:"vehicleId,omitempty"`
 }
 
+type LineStatus struct {
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	ModeName     string       `json:"modeName,omitempty"`
+	LineStatuses []LineState  `json:"lineStatuses,omitempty"`
+	Disruptions  []Disruption `json:"disruptions,omitempty"`
+}
+
+type LineState struct {
+	StatusSeverity            int         `json:"statusSeverity"`
+	StatusSeverityDescription string      `json:"statusSeverityDescription"`
+	Reason                    string      `json:"reason,omitempty"`
+	Disruption                *Disruption `json:"disruption,omitempty"`
+}
+
+type Disruption struct {
+	Category    string `json:"category,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Description string `json:"description,omitempty"`
+	ClosureText string `json:"closureText,omitempty"`
+	Summary     string `json:"summary,omitempty"`
+	LineID      string `json:"lineId,omitempty"`
+	LineName    string `json:"lineName,omitempty"`
+}
+
 type rawArrival struct {
 	LineName        string `json:"lineName"`
 	DestinationName string `json:"destinationName"`
@@ -211,6 +236,89 @@ func (c *Client) StopPoint(ctx context.Context, stopID string) (StopPoint, error
 		return out, err
 	}
 	return out, c.getJSON(ctx, u, &out)
+}
+
+func (c *Client) LineStatus(ctx context.Context, lines, modes []string) ([]LineStatus, error) {
+	lineIDs := strings.Join(cleanCSV(lines), ",")
+	var path string
+	if lineIDs != "" {
+		path = "/Line/" + url.PathEscape(lineIDs) + "/Status"
+	} else {
+		modeIDs := strings.Join(cleanCSV(modes), ",")
+		if modeIDs == "" {
+			modeIDs = "tube,dlr,elizabeth-line,overground,tram"
+		}
+		path = "/Line/Mode/" + url.PathEscape(modeIDs) + "/Status"
+	}
+	u, err := c.endpoint(path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []LineStatus
+	return out, c.getJSON(ctx, u, &out)
+}
+
+func (c *Client) LineDisruptions(ctx context.Context, lines, modes []string) ([]Disruption, error) {
+	statuses, err := c.LineStatus(ctx, lines, modes)
+	if err != nil {
+		return nil, err
+	}
+	var out []Disruption
+	seen := map[string]struct{}{}
+	addDisruption := func(d Disruption) {
+		key := strings.Join([]string{d.LineID, d.LineName, d.Category, d.Type, d.Description, d.ClosureText, d.Summary}, "\x00")
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, d)
+	}
+	for _, line := range statuses {
+		for _, disruption := range line.Disruptions {
+			disruption.LineID = firstNonEmpty(disruption.LineID, line.ID)
+			disruption.LineName = firstNonEmpty(disruption.LineName, line.Name)
+			addDisruption(disruption)
+		}
+		for _, state := range line.LineStatuses {
+			if state.StatusSeverity == 10 && strings.TrimSpace(state.Reason) == "" && state.Disruption == nil {
+				continue
+			}
+			if state.Disruption != nil {
+				disruption := *state.Disruption
+				disruption.LineID = firstNonEmpty(disruption.LineID, line.ID)
+				disruption.LineName = firstNonEmpty(disruption.LineName, line.Name)
+				disruption.Category = firstNonEmpty(disruption.Category, "LineStatus")
+				disruption.Type = firstNonEmpty(disruption.Type, state.StatusSeverityDescription)
+				disruption.Description = firstNonEmpty(disruption.Description, state.Reason, state.StatusSeverityDescription)
+				addDisruption(disruption)
+				continue
+			}
+			description := strings.TrimSpace(state.Reason)
+			if description == "" {
+				description = state.StatusSeverityDescription
+			}
+			addDisruption(Disruption{
+				Category:    "LineStatus",
+				Type:        state.StatusSeverityDescription,
+				Description: description,
+				LineID:      line.ID,
+				LineName:    line.Name,
+			})
+		}
+	}
+	if out == nil {
+		return []Disruption{}, nil
+	}
+	return out, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (c *Client) LineArrivals(ctx context.Context, stopID string, lines []string, direction, destinationStationID string) ([]Arrival, error) {

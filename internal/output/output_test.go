@@ -25,3 +25,44 @@ func TestWriteJSON(t *testing.T) {
 		t.Fatalf("unexpected json: %s", b.String())
 	}
 }
+
+func TestProject(t *testing.T) {
+	value := map[string]any{
+		"lines": []map[string]any{{
+			"name": "Victoria",
+			"states": []map[string]any{{
+				"severity": "Good Service",
+			}},
+		}},
+	}
+
+	got, err := Project(value, "lines.0.states.0.severity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Good Service" {
+		t.Fatalf("projection=%#v", got)
+	}
+
+	if got, err := Project(value, ""); err != nil || got == nil {
+		t.Fatalf("empty projection got=%#v err=%v", got, err)
+	}
+}
+
+func TestProjectErrors(t *testing.T) {
+	value := map[string]any{"lines": []any{map[string]any{"name": "Victoria"}}}
+	cases := []string{
+		"lines.1.name",
+		"lines.name",
+		"missing",
+		"lines.bad",
+		"lines.0.name.extra",
+	}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			if _, err := Project(value, path); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}

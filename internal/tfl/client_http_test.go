@@ -11,6 +11,14 @@ import (
 
 func TestClientAgainstHTTPServer(t *testing.T) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/Line/Mode/tube,dlr,elizabeth-line,overground,tram/Status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[{\"id\":\"victoria\",\"name\":\"Victoria\",\"modeName\":\"tube\",\"lineStatuses\":[{\"statusSeverity\":10,\"statusSeverityDescription\":\"Good Service\"}]}]"))
+	})
+	mux.HandleFunc("/Line/victoria/Status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[{\"id\":\"victoria\",\"name\":\"Victoria\",\"modeName\":\"tube\",\"lineStatuses\":[{\"statusSeverity\":6,\"statusSeverityDescription\":\"Severe Delays\",\"disruption\":{\"category\":\"RealTime\",\"type\":\"lineInfo\",\"description\":\"Minor platform crowding\",\"closureText\":\"minorDelays\"}}]}]"))
+	})
 	mux.HandleFunc("/StopPoint/Search", func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("query"); got != "London Bridge" {
 			t.Fatalf("query=%q", got)
@@ -100,6 +108,21 @@ func TestClientAgainstHTTPServer(t *testing.T) {
 	c := NewClient("")
 	c.BaseURL = srv.URL
 
+	statuses, err := c.LineStatus(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 1 || statuses[0].LineStatuses[0].StatusSeverityDescription != "Good Service" {
+		t.Fatalf("unexpected statuses: %+v", statuses)
+	}
+	disruptions, err := c.LineDisruptions(context.Background(), []string{"victoria"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(disruptions) != 1 || disruptions[0].LineName != "Victoria" || disruptions[0].Description != "Minor platform crowding" {
+		t.Fatalf("unexpected disruptions: %+v", disruptions)
+	}
+
 	search, err := c.StopSearch(context.Background(), "London Bridge")
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +181,7 @@ func TestJourneyDisambiguationErrorIsStructured(t *testing.T) {
 	mux.HandleFunc("/Journey/JourneyResults/1000139/to/Highgate", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMultipleChoices)
-		_, _ = w.Write([]byte(`{"toLocationDisambiguation":{"matchStatus":"list","disambiguationOptions":[{"parameterValue":"1000109","uri":"/journey/journeyresults/se192xe/to/1000109","place":{"commonName":"Highgate (London), Highgate","placeType":"StopPoint","naptanId":"490000109S","icsCode":"1000109","modes":["tube","bus"],"lat":51.5777,"lon":-0.1457},"matchQuality":1000}]},"fromLocationDisambiguation":{"matchStatus":"identified"},"journeyVector":{"from":"SE192XE","to":"Highgate"}}`))
+		_, _ = w.Write([]byte(`{"toLocationDisambiguation":{"matchStatus":"list","disambiguationOptions":[{"parameterValue":"1000109","uri":"/journey/journeyresults/1000139/to/1000109","place":{"commonName":"Highgate (London), Highgate","placeType":"StopPoint","naptanId":"490000109S","icsCode":"1000109","modes":["tube","bus"],"lat":51.5777,"lon":-0.1457},"matchQuality":1000}]},"fromLocationDisambiguation":{"matchStatus":"identified"},"journeyVector":{"from":"1000139","to":"Highgate"}}`))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
