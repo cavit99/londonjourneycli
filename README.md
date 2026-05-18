@@ -62,6 +62,7 @@ TfL examples:
     londonjourneycli --json tfl stop-info --stop 490G00008459
     londonjourneycli --json tfl nearby-stops --lat 51.505 --lon -0.087 --mode bus --limit 5
     londonjourneycli --json tfl nearby-stops --location "51.505,-0.087" --mode bus --limit 5
+    londonjourneycli --json tfl accessible-stations --near "Oxford Circus" --mode tube --radius 1200 --require-step-free
     londonjourneycli tfl status --line victoria
     londonjourneycli --json tfl disruptions --mode tube,dlr,elizabeth-line,overground,tram
     londonjourneycli --json tfl line-routes --line victoria
@@ -72,7 +73,7 @@ TfL examples:
     londonjourneycli --json tfl arrivals --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
 
-For agents, resolve fuzzy places before calling journey: turn "home", "office", venue names, and vague areas into exact addresses, postcodes, coordinates, or TfL IDs. If the user shared a WhatsApp/OpenClaw location, pass the coordinates or location context text to nearby-stops with --location. If TfL still returns JSON status "ambiguous", use the returned disambiguation options to retry or ask one clarification.
+For agents, resolve fuzzy places before calling journey: turn "home", "office", venue names, and vague areas into exact addresses, postcodes, coordinates, or TfL IDs. If the user shared a WhatsApp/OpenClaw location, pass the coordinates or location context text to nearby-stops with --location. For accessible route planning, prefer journey's native --accessibility preferences. For nearby station discovery, use accessible-stations; it resolves --near through StopSearch and returns station candidates sorted by distance with accessStatus, stepFreeAccess, liftPresent, lifts, and accessViaLift fields. If TfL still returns JSON status "ambiguous", use the returned disambiguation options to retry or ask one clarification.
 
 ## Skill Manifests
 

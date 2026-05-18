@@ -17,9 +17,12 @@ Examples:
     londonjourneycli --json tfl disruptions --mode tube,dlr,elizabeth-line,overground,tram
     londonjourneycli --json tfl line-routes --line victoria
     londonjourneycli --json tfl nearby-stops --lat 51.505 --lon -0.087 --mode bus --limit 5
+    londonjourneycli --json tfl accessible-stations --near "Oxford Circus" --mode tube --radius 1200 --require-step-free
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl arrivals --stop 490000235N --line 43
     londonjourneycli --json tfl stop-search "London Bridge" --mode tube,bus
     londonjourneycli --json tfl stop-info --stop 490G00008459
 
 For time-critical heads-ups, use londonjourneycli tfl watch-arrival from OpenClaw cron with explicit visible delivery. Prefer --query for user-named stops and --stop only when you already have the TfL stop ID.
+
+For accessible journey questions, prefer tfl journey --accessibility with --between-entrances. For nearby station-discovery questions, use accessible-stations rather than hand-checking stop metadata. It returns station candidates sorted by distance with accessStatus, stepFreeAccess, liftPresent, lifts, and accessViaLift fields. Use --require-step-free for confirmed AccessViaLift=true; use --require-lift for broader lift-present candidates.

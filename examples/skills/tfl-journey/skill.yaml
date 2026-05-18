@@ -24,6 +24,9 @@ commands:
   - name: nearby-stops
     description: Find TfL stops near coordinates.
     exec: [londonjourneycli, tfl, nearby-stops]
+  - name: accessible-stations
+    description: Find nearby stations with TfL lift/access metadata.
+    exec: [londonjourneycli, tfl, accessible-stations]
   - name: journey
     description: Plan a journey with TfL.
     exec: [londonjourneycli, tfl, journey]

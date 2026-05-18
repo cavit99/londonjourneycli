@@ -144,6 +144,9 @@ func TestCLIFormattingHelpers(t *testing.T) {
 	if got := canonicalWalkingSpeed("fast"); got != "Fast" {
 		t.Fatalf("walking speed=%q", got)
 	}
+	if got := canonicalAccessibilityPreferences("step-free-to-platform,no-escalators,nolifts"); len(got) != 3 || got[0] != "StepFreeToPlatform" || got[1] != "NoEscalators" || got[2] != "NoElevators" {
+		t.Fatalf("accessibility preferences=%v", got)
+	}
 	if got := canonicalCyclePreference("take-on-transport"); got != "TakeOnTransport" {
 		t.Fatalf("cycle preference=%q", got)
 	}
@@ -155,6 +158,38 @@ func TestCLIFormattingHelpers(t *testing.T) {
 	}
 	if got := queryModes("bus,tube"); len(got) != 2 || got[1] != "tube" {
 		t.Fatalf("query modes csv=%v", got)
+	}
+	if got := defaultAccessibleStationStopTypes([]string{"tube", "national-rail", "river-bus", "bus"}); strings.Join(got, ",") != "NaptanMetroStation,NaptanRailStation,NaptanFerryPort,NaptanBusCoachStation" {
+		t.Fatalf("accessible stop types=%v", got)
+	}
+	if got := defaultAccessibleStationStopTypes(nil); len(got) != 4 {
+		t.Fatalf("default accessible stop types=%v", got)
+	}
+	if got := humanAccessStatus("lift_present_unconfirmed"); got != "lift present, step-free unconfirmed" {
+		t.Fatalf("human access status=%q", got)
+	}
+	if got := humanAccessStatus("unknown"); got != "unknown accessibility" {
+		t.Fatalf("human access status default=%q", got)
+	}
+	if got := liftLabel(nil); got != "lifts unknown" {
+		t.Fatalf("lift label nil=%q", got)
+	}
+	one := 1
+	if got := liftLabel(&one); got != "1 lift" {
+		t.Fatalf("lift label one=%q", got)
+	}
+	yes := true
+	if got := formatOptionalBool(&yes); got != "true" {
+		t.Fatalf("optional bool=%q", got)
+	}
+	if got := formatOptionalInt(&one); got != "1" {
+		t.Fatalf("optional int=%q", got)
+	}
+	if got := accessViaLiftLabel(nil); got != "access via lift unknown" {
+		t.Fatalf("access via lift label=%q", got)
+	}
+	if got := accessViaLiftLabel(&yes); got != "access via lift yes" {
+		t.Fatalf("access via lift true label=%q", got)
 	}
 	if got := roundMinutes(89); got != 1 {
 		t.Fatalf("round minutes=%d", got)
@@ -225,6 +260,11 @@ func TestTFLCommandUsageEdges(t *testing.T) {
 		{name: "nearby invalid longitude", args: []string{"tfl", "nearby-stops", "--lat", "51.5", "--lon", "-181"}, code: exitcode.Usage, want: "longitude must be between"},
 		{name: "nearby bad radius", args: []string{"tfl", "nearby-stops", "--lat", "51", "--lon", "-0.1", "--radius", "0"}, code: exitcode.Usage, want: "--radius must be > 0"},
 		{name: "nearby bad limit", args: []string{"tfl", "nearby-stops", "--lat", "51", "--lon", "-0.1", "--limit", "0"}, code: exitcode.Usage, want: "--limit must be > 0"},
+		{name: "accessible missing location", args: []string{"tfl", "accessible-stations"}, code: exitcode.Usage, want: "provide exactly one of --near"},
+		{name: "accessible mixed location", args: []string{"tfl", "accessible-stations", "--near", "Oxford Circus", "--lat", "51.5", "--lon", "-0.1"}, code: exitcode.Usage, want: "provide exactly one of --near"},
+		{name: "accessible bad location", args: []string{"tfl", "accessible-stations", "--location", "somewhere"}, code: exitcode.Usage, want: "could not parse --location"},
+		{name: "accessible bad radius", args: []string{"tfl", "accessible-stations", "--lat", "51", "--lon", "-0.1", "--radius", "0"}, code: exitcode.Usage, want: "--radius must be > 0"},
+		{name: "accessible bad limit", args: []string{"tfl", "accessible-stations", "--lat", "51", "--lon", "-0.1", "--limit", "0"}, code: exitcode.Usage, want: "--limit must be > 0"},
 		{name: "line routes missing line", args: []string{"tfl", "line-routes"}, code: exitcode.Usage, want: "--line is required"},
 		{name: "line routes blank line", args: []string{"tfl", "line-routes", "--line", ","}, code: exitcode.Usage, want: "--line is required"},
 		{name: "stop search missing flag value", args: []string{"tfl", "stop-search", "London", "--mode"}, code: exitcode.Usage, want: "--mode requires a value"},
