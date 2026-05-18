@@ -436,7 +436,38 @@ func firstNonEmpty(values ...string) string {
 func (c *Client) LineArrivals(ctx context.Context, stopID string, lines []string, direction, destinationStationID string) ([]Arrival, error) {
 	ids := strings.Join(cleanCSV(lines), ",")
 	if ids == "" {
-		return c.Arrivals(ctx, stopID)
+		arrivals, err := c.Arrivals(ctx, stopID)
+		if err != nil || len(arrivals) > 0 {
+			return arrivals, err
+		}
+		if !isLikelyGroupedStopID(stopID) {
+			return arrivals, nil
+		}
+		children, err := c.descendantStopIDs(ctx, stopID)
+		if err != nil {
+			return arrivals, err
+		}
+		if len(children) == 0 {
+			return arrivals, nil
+		}
+		combined := []Arrival{}
+		var firstErr error
+		for _, childID := range children {
+			childArrivals, err := c.Arrivals(ctx, childID)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			combined = append(combined, childArrivals...)
+		}
+		if len(combined) == 0 && firstErr != nil {
+			return nil, firstErr
+		}
+		combined = dedupeArrivals(combined)
+		sort.Slice(combined, func(i, j int) bool { return combined[i].TimeToStation < combined[j].TimeToStation })
+		return combined, nil
 	}
 	params := url.Values{}
 	if direction != "" {
@@ -453,11 +484,18 @@ func (c *Client) LineArrivals(ctx context.Context, stopID string, lines []string
 	if err != nil || len(arrivals) > 0 {
 		return arrivals, err
 	}
+	if !isLikelyGroupedStopID(stopID) {
+		return arrivals, nil
+	}
 	children, err := c.descendantStopIDs(ctx, stopID)
-	if err != nil || len(children) == 0 {
+	if err != nil {
+		return arrivals, err
+	}
+	if len(children) == 0 {
 		return arrivals, nil
 	}
 	combined := []Arrival{}
+	var firstErr error
 	for _, childID := range children {
 		childURL, err := c.endpoint("/Line/"+url.PathEscape(ids)+"/Arrivals/"+url.PathEscape(childID), params)
 		if err != nil {
@@ -465,9 +503,15 @@ func (c *Client) LineArrivals(ctx context.Context, stopID string, lines []string
 		}
 		childArrivals, err := c.getArrivals(ctx, childURL)
 		if err != nil {
-			return nil, err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		combined = append(combined, childArrivals...)
+	}
+	if len(combined) == 0 && firstErr != nil {
+		return nil, firstErr
 	}
 	combined = dedupeArrivals(combined)
 	sort.Slice(combined, func(i, j int) bool { return combined[i].TimeToStation < combined[j].TimeToStation })

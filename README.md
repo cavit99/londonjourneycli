@@ -68,6 +68,7 @@ TfL examples:
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
     londonjourneycli tfl journey --from "Westminster" --to "Waterloo" --preference LeastWalking --max-walking-minutes 15
     londonjourneycli --json tfl arrivals --stop 490000235N --line 43
+    londonjourneycli --json tfl arrivals --query "Ildersly Grove" --line N3
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
 
 For agents, resolve fuzzy places before calling journey: turn "home", "office", venue names, and vague areas into exact addresses, postcodes, coordinates, or TfL IDs. If TfL still returns JSON status "ambiguous", use the returned disambiguation options to retry or ask one clarification.

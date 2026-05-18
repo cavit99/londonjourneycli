@@ -23,6 +23,7 @@ JSON mode structures TfL API errors and request failures. Journey planning can r
 
 Use tfl status and tfl disruptions before giving time-sensitive route advice when delays would change the recommendation.
 Use tfl line-routes when choosing or explaining line direction, termini, or service sections.
+Use tfl arrivals --query when the user gives a stop/station name and the agent needs several upcoming predictions without first running stop-search.
 
 Use tfl nearby-stops when the user gives a current GPS/location coordinate or when a resolved address yields coordinates and the agent needs concrete stop IDs nearby.
 
