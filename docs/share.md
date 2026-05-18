@@ -13,6 +13,7 @@ Short post:
 Useful demo commands:
 
     londonjourneycli tfl journey --from "London Bridge" --to "Paddington"
+    londonjourneycli --json tfl compare --from "London Bridge" --to "Paddington" --rank balanced --include-alternatives
     londonjourneycli --json tfl fare --from-zone 3 --to-zone 1 --period peak --payment contactless
     londonjourneycli --json tfl accessible-stations --near "Oxford Circus" --mode tube --radius 1200 --require-step-free
     londonjourneycli --json tfl next-arrival --query "Ildersly Grove" --line N3
@@ -23,6 +24,7 @@ Useful demo commands:
 What makes it different from broader TfL wrappers:
 
 - Task-shaped commands, not just endpoint exposure.
+- Built-in journey comparison/ranking for route choice.
 - Stop-name plus line resolution for arrivals.
 - Location-share nearby-stop lookup.
 - Route-sensitive and zonal fare answers.

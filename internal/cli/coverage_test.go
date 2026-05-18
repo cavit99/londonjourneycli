@@ -282,6 +282,8 @@ func TestTFLCommandUsageEdges(t *testing.T) {
 		{name: "next arrival bad limit", args: []string{"tfl", "next-arrival", "--stop", "490", "--line", "43", "--limit", "0"}, code: exitcode.Usage, want: "--limit must be > 0"},
 		{name: "next arrival bad search limit", args: []string{"tfl", "next-arrival", "--query", "London", "--line", "43", "--search-limit", "0"}, code: exitcode.Usage, want: "--search-limit must be > 0"},
 		{name: "journey missing endpoints", args: []string{"tfl", "journey", "--from", "home"}, code: exitcode.Usage, want: "--from and --to are required"},
+		{name: "compare missing endpoints", args: []string{"tfl", "compare", "--from", "home"}, code: exitcode.Usage, want: "--from and --to are required"},
+		{name: "compare bad rank", args: []string{"tfl", "compare", "--from", "A", "--to", "B", "--rank", "prettiest"}, code: exitcode.Usage, want: "--rank must be one of"},
 		{name: "fares missing endpoints", args: []string{"tfl", "fares", "--from", "A"}, code: exitcode.Usage, want: "provide either --from/--to"},
 		{name: "fares mixed station and zone", args: []string{"tfl", "fares", "--from", "A", "--from-zone", "1", "--to-zone", "3"}, code: exitcode.Usage, want: "cannot be combined"},
 		{name: "fares missing zone pair", args: []string{"tfl", "fares", "--from-zone", "1"}, code: exitcode.Usage, want: "required together"},
